@@ -1,0 +1,87 @@
+{
+  "name": "tanstack-dexie-db-collection",
+  "description": "Dexie collection for TanStack DB",
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "@standard-schema/spec": "^1.0.0",
+    "@tanstack/db": "latest",
+    "debug": "^4.4.1",
+    "dexie": "4.2.0"
+  },
+  "devDependencies": {
+    "@stylistic/eslint-plugin": "^5.4.0",
+    "@tanstack/config": "^0.20.1",
+    "@types/debug": "^4.1.12",
+    "@types/node": "^24.5.2",
+    "@vitest/coverage-istanbul": "^3.0.9",
+    "@vitest/ui": "^3.2.4",
+    "bumpp": "^10.2.3",
+    "eslint": "link:@tanstack/config/eslint",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "fake-indexeddb": "^6.2.2",
+    "jsdom": "^27.0.0",
+    "vite": "link:@tanstack/config/vite",
+    "vitest": "^3.2.4",
+    "zod": "^4"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "packageManager": "pnpm@10.6.3",
+  "peerDependencies": {
+    "dexie": ">=4.2.0",
+    "typescript": ">=4.7"
+  },
+  "author": "Himanshu Kumar Dutt <adasimobenio@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/dexie-db-collection"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "dexie",
+    "nosql",
+    "realtime",
+    "local-first",
+    "sync",
+    "indexeddb",
+    "localstorage",
+    "optimistic",
+    "typescript"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "lint": "eslint . --fix",
+    "test": "npx vitest --run",
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
+    "release": "bumpp && npm publish"
+  },
+  "sideEffects": false,
+  "types": "dist/esm/index.d.ts",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
