@@ -1,7 +1,7 @@
 import "./fake-db"
 import { afterEach, describe, expect, it } from "vitest"
 import { createCollection } from "@tanstack/db"
-import dexieCollectionOptions from "../src/dexie"
+import { dexieCollectionOptions } from "../src"
 import { cleanupTestResources, createTestState, getDexie } from "./test-helpers"
 
 describe(`Dexie Error Handling`, () => {

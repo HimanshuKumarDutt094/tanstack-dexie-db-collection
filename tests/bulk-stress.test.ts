@@ -2,7 +2,7 @@ import "./fake-db"
 
 import { afterEach, describe, expect, it } from "vitest"
 import { createCollection } from "@tanstack/db"
-import dexieCollectionOptions from "../src/dexie"
+import { dexieCollectionOptions } from "../src"
 import {
   cleanupTestResources,
   createTestState,
@@ -342,7 +342,9 @@ describe(`Dexie Bulk Operations Stress Testing`, () => {
 
       const batchDuration = Date.now() - batchStart
       console.log(
-        `Batch ${batch + 1}/${totalBatches} completed in ${batchDuration}ms (${insertedCount}/${totalItems} total)`
+        `Batch ${
+          batch + 1
+        }/${totalBatches} completed in ${batchDuration}ms (${insertedCount}/${totalItems} total)`
       )
 
       // Verify progressive state

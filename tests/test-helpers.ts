@@ -3,7 +3,7 @@ import "fake-indexeddb/auto"
 import "./fake-db"
 import { createCollection } from "@tanstack/db"
 import { z } from "zod"
-import dexieCollectionOptions from "../src/dexie"
+import { dexieCollectionOptions } from "../src/dexie"
 import type Dexie from "dexie"
 
 /**

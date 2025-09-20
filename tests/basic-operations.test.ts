@@ -1,7 +1,7 @@
 import "./fake-db"
 import { createCollection } from "@tanstack/db"
 import { afterEach, describe, expect, it } from "vitest"
-import dexieCollectionOptions from "../src/dexie"
+import { dexieCollectionOptions } from "../src"
 import {
   TestItemSchema,
   cleanupTestResources,
