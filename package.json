@@ -54,10 +54,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TanStack/db.git",
-    "directory": "packages/dexie-db-collection"
+    "url": "https://github.com/HimanshuKumarDutt094/tanstack-dexie-db-collection.git"
   },
-  "homepage": "https://tanstack.com/db",
   "keywords": [
     "dexie",
     "nosql",
