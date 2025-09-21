@@ -1,8 +1,4 @@
----
-title: Dexie Collection
----
-
-# Dexie Collection
+# Unofficial Dexie Collection
 
 Dexie collections provide seamless integration between TanStack DB and [Dexie.js](https://dexie.org), enabling a local-first persistence layer with efficient change monitoring and IndexedDB storage. This integration keeps an in-memory TanStack DB collection in perfect sync with a Dexie table while supporting optimistic updates, efficient syncing, and reactive live updates.
 
