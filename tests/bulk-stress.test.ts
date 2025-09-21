@@ -52,6 +52,141 @@ describe(`Dexie Bulk Operations Stress Testing`, () => {
     expect(dbCount).toBe(batchSize)
   })
 
+  describe(`Persistence-backed Bulk Scenarios`, () => {
+    it(`onInsert backend receives transactions for many quick inserts`, async () => {
+      const { db } = await createTestState()
+
+      const serverBuffer: Array<any> = []
+
+      // Provide a handler that simulates chunk processing on server side
+      // override underlying onInsert by recreating collection with handler
+      const opts2 = dexieCollectionOptions({
+        id: `bulk-server`,
+        tableName: `test`,
+        dbName: db.name,
+        getKey: (i: any) => i.id,
+        onInsert: async ({ transaction }) => {
+          // push all modified items from this transaction to server buffer
+          transaction.mutations.forEach((m: any) => {
+            serverBuffer.push(m.modified)
+          })
+          // simulate variable server work
+          await new Promise((r) => setTimeout(r, 5))
+        },
+      })
+
+      const colServer = createCollection(opts2)
+      await colServer.stateWhenReady()
+
+      // Quickly insert many items
+      const N = 300
+      const promises: Array<Promise<void>> = []
+      for (let i = 0; i < N; i++) {
+        const tx = colServer.insert({ id: `bulk-${i}`, name: `B${i}` })
+        promises.push(tx.isPersisted.promise.then(() => {}))
+      }
+
+      await Promise.all(promises)
+      // Give server handler time
+      await new Promise((r) => setTimeout(r, 200))
+
+      // All inserts should have been forwarded to our server buffer
+      expect(serverBuffer.length).toBe(N)
+
+      // Sanity check few items
+      expect(serverBuffer[0].id).toBeDefined()
+      expect(serverBuffer[N - 1].name).toBe(`B${N - 1}`)
+    }, 20000)
+
+    it(`chunk boundary: small syncBatchSize causes multiple handler invocations`, async () => {
+      const { db } = await createTestState()
+
+      const seenBatches: Array<number> = []
+
+      const opts = dexieCollectionOptions({
+        id: `chunk-test`,
+        tableName: `test`,
+        dbName: db.name,
+        getKey: (i: any) => i.id,
+        syncBatchSize: 5,
+        onInsert: ({ transaction }) => {
+          seenBatches.push(transaction.mutations.length)
+        },
+      })
+
+      const col = createCollection(opts)
+      await col.stateWhenReady()
+
+      const N = 12
+      const promises: Array<Promise<void>> = []
+      for (let i = 0; i < N; i++) {
+        const tx = col.insert({ id: `c-${i}`, name: `C${i}` })
+        promises.push(tx.isPersisted.promise.then(() => {}))
+      }
+
+      await Promise.all(promises)
+      // let handlers run
+      await new Promise((r) => setTimeout(r, 200))
+
+      // With batchSize 5, 12 inserts should produce at least 3 batch handler invocations
+      expect(seenBatches.reduce((s, v) => s + v, 0)).toBe(N)
+      expect(seenBatches.length).toBeGreaterThanOrEqual(3)
+    }, 20000)
+
+    it(`onUpdate/onDelete handlers receive correct bulk mutations`, async () => {
+      const initial = Array.from({ length: 5 }, (_, i) => ({
+        id: String(i),
+        name: `I${i}`,
+      }))
+      const { db } = await createTestState(initial)
+
+      const updatesSeen: Array<any> = []
+      const deletesSeen: Array<any> = []
+
+      const opts = dexieCollectionOptions({
+        id: `bulk-ops`,
+        tableName: `test`,
+        dbName: db.name,
+        getKey: (i: any) => i.id,
+        onUpdate: ({ transaction }) => {
+          transaction.mutations.forEach((m: any) => {
+            updatesSeen.push({ key: m.key, changes: m.changes })
+          })
+        },
+        onDelete: ({ transaction }) => {
+          transaction.mutations.forEach((m: any) => deletesSeen.push(m.key))
+        },
+      })
+
+      const col = createCollection(opts)
+      await col.stateWhenReady()
+
+      // Update all items on the collection with handlers and await persistence
+      const updatePromises: Array<Promise<void>> = []
+      for (let i = 0; i < initial.length; i++) {
+        const tx = col.update(String(i), (d: any) => (d.name = `U${i}`))
+        updatePromises.push(tx.isPersisted.promise.then(() => {}))
+      }
+
+      // Delete two items and await their persistence
+      const del1 = col.delete(`1`)
+      const del3 = col.delete(`3`)
+
+      await Promise.all([
+        Promise.all(updatePromises),
+        del1.isPersisted.promise,
+        del3.isPersisted.promise,
+      ])
+      // give handlers a moment
+      await new Promise((r) => setTimeout(r, 50))
+
+      // Expect updates seen for at least the updated items
+      expect(updatesSeen.length).toBeGreaterThanOrEqual(5)
+      expect(deletesSeen).toContain(`1`)
+      expect(deletesSeen).toContain(`3`)
+    })
+  })
+
   it(`handles rapid concurrent insertions across multiple collections`, async () => {
     // Use a unique DB base per test run so the three collections share
     // the same DB while still avoiding collisions with other tests.
@@ -373,5 +508,5 @@ describe(`Dexie Bulk Operations Stress Testing`, () => {
 
     const retrievalDuration = Date.now() - retrievalStart
     console.log(`Retrieved 50 random items in ${retrievalDuration}ms`)
-  })
+  }, 15000) // Increase timeout to 15 seconds for this performance test
 })

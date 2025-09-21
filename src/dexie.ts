@@ -36,7 +36,7 @@ export interface DexieCodec<TItem, TStored = TItem> {
  */
 export interface DexieCollectionConfig<
   TItem extends object = Record<string, unknown>,
-  TSchema extends StandardSchemaV1 = never,
+  TSchema extends StandardSchemaV1 = never
 > extends Omit<
     CollectionConfig<TItem, string | number, TSchema>,
     `onInsert` | `onUpdate` | `onDelete` | `getKey` | `sync`
@@ -50,6 +50,20 @@ export interface DexieCollectionConfig<
   syncBatchSize?: number
   ackTimeoutMs?: number
   awaitTimeoutMs?: number
+  // If true, Dexie will await the user-provided persistence handler
+  // before resolving the collection handler. Default: false (fire-and-forget).
+  awaitPersistence?: boolean
+  // Timeout (ms) when awaiting user persistence handlers. Default: 5000.
+  persistenceTimeoutMs?: number
+  // If true, errors thrown by user persistence handlers will be swallowed
+  // (logged) instead of propagating. Default: true.
+  swallowPersistenceErrors?: boolean
+  // Optional user-provided persistence handlers. These will be called
+  // AFTER dexie writes complete. They receive the same params as
+  // collection mutation handlers.
+  onInsert?: (params: InsertMutationFnParams<TItem>) => Promise<any> | any
+  onUpdate?: (params: UpdateMutationFnParams<TItem>) => Promise<any> | any
+  onDelete?: (params: DeleteMutationFnParams<TItem>) => Promise<any> | any
   getKey: (item: TItem) => string | number
 }
 
@@ -88,7 +102,7 @@ export function dexieCollectionOptions<T extends object>(
 
 export function dexieCollectionOptions<
   TItem extends object = Record<string, unknown>,
-  TSchema extends StandardSchemaV1 = never,
+  TSchema extends StandardSchemaV1 = never
 >(
   config: DexieCollectionConfig<TItem, TSchema>
 ): CollectionConfig<TItem, string | number, TSchema> & { utils: DexieUtils } {
@@ -212,6 +226,59 @@ export function dexieCollectionOptions<
       } catch {}
 
       throw new Error(`Timeout waiting for IDs: ${ids.join(`, `)}`)
+    }
+  }
+
+  // Helper to centralize calling user persistence handlers safely.
+  // Ensures no unhandled rejections, supports awaitTimeout, and respects swallow flag.
+  const safeCallPersistence = async (opts: {
+    call: () => Promise<unknown> | unknown
+    awaitPersistence?: boolean | undefined
+    timeoutMs?: number | undefined
+    swallow?: boolean | undefined
+    debugTag: string
+  }) => {
+    const { call, awaitPersistence, timeoutMs, swallow, debugTag } = opts
+
+    if (!awaitPersistence) {
+      // Fire-and-forget but attach a catch to avoid unhandledRejection.
+      void Promise.resolve()
+        .then(call)
+        .catch((err) => {
+          debug(`persistence:${debugTag}:error`, { error: String(err) })
+        })
+      return
+    }
+
+    // Awaiting branch with timeout and swallow handling.
+    const tMs = timeoutMs ?? 5000
+    try {
+      const callP = Promise.resolve().then(call)
+      // Prevent Node emitting unhandledRejection before we await it.
+      void callP.catch(() => {})
+
+      let timeoutId: NodeJS.Timeout
+      const timeoutP = new Promise<never>((_, rej) => {
+        timeoutId = setTimeout(() => rej(new Error(`persistence:timeout`)), tMs)
+      })
+      // Prevent unhandled rejection on timeout promise
+      void timeoutP.catch(() => {})
+
+      try {
+        const result = await Promise.race([callP, timeoutP])
+        clearTimeout(timeoutId!)
+        return result
+      } catch (err) {
+        clearTimeout(timeoutId!)
+        throw err
+      }
+    } catch (err) {
+      if (swallow ?? true) {
+        debug(`persistence:${debugTag}:error`, { error: String(err) })
+        return
+      } else {
+        throw err
+      }
     }
   }
 
@@ -606,9 +673,12 @@ export function dexieCollectionOptions<
     // bulk insert
 
     // Perform bulk operation using Dexie transaction
-    await db.transaction(`rw`, table, async () => {
+    const txP = db.transaction(`rw`, table, async () => {
       await table.bulkPut(items)
     })
+    // Attach a no-op catch immediately to avoid transient unhandled rejections
+    void txP.catch(() => {})
+    await txP
     await db.table(tableName).count()
 
     // Optimistically mark IDs as seen immediately after write so callers
@@ -623,13 +693,25 @@ export function dexieCollectionOptions<
     for (const id of ids) seenIds.set(id, now)
     triggerRefresh()
 
+    // If user provided a persistence handler in config, call it AFTER local write
+    if (typeof config.onInsert === `function`) {
+      const call = () => config.onInsert!(insertParams)
+      await safeCallPersistence({
+        call,
+        awaitPersistence: config.awaitPersistence,
+        timeoutMs: config.persistenceTimeoutMs,
+        swallow: config.swallowPersistenceErrors,
+        debugTag: `onInsert`,
+      })
+    }
+
     return ids
   }
 
   const onUpdate = async (updateParams: UpdateMutationFnParams<TItem>) => {
     updateParams.collection.startSyncImmediate()
     const mutations = updateParams.transaction.mutations
-    await db.transaction(`rw`, table, async () => {
+    const txUP = db.transaction(`rw`, table, async () => {
       for (const mutation of mutations) {
         const key = mutation.key
         if (config.rowUpdateMode === `full`) {
@@ -645,10 +727,24 @@ export function dexieCollectionOptions<
         }
       }
     })
+    void txUP.catch(() => {})
+    await txUP
     const ids = mutations.map((m) => m.key)
     const now = Date.now()
     for (const id of ids) seenIds.set(id, now)
     triggerRefresh()
+
+    if (typeof config.onUpdate === `function`) {
+      const call = () => config.onUpdate!(updateParams)
+      await safeCallPersistence({
+        call,
+        awaitPersistence: config.awaitPersistence,
+        timeoutMs: config.persistenceTimeoutMs,
+        swallow: config.swallowPersistenceErrors,
+        debugTag: `onUpdate`,
+      })
+    }
+
     return ids
   }
 
@@ -661,11 +757,24 @@ export function dexieCollectionOptions<
 
     // bulk delete
 
-    await db.transaction(`rw`, table, async () => {
+    const txD = db.transaction(`rw`, table, async () => {
       await table.bulkDelete(ids)
     })
+    void txD.catch(() => {})
+    await txD
 
     ids.forEach((id) => seenIds.delete(id))
+
+    if (typeof config.onDelete === `function`) {
+      const call = () => config.onDelete!(deleteParams)
+      await safeCallPersistence({
+        call,
+        awaitPersistence: config.awaitPersistence,
+        timeoutMs: config.persistenceTimeoutMs,
+        swallow: config.swallowPersistenceErrors,
+        debugTag: `onDelete`,
+      })
+    }
 
     return ids
   }

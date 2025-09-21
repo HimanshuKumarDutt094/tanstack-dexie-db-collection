@@ -255,6 +255,15 @@ todosCollection.utils.refresh()
 await todosCollection.utils.refetch()
 ```
 
+## External backend sync
+
+This repo includes copy-paste-ready examples for persistence handlers and backend sync in `EXAMPLES.md` (project root). See that file for complete snippets. Minimal summary:
+
+- Handlers receive `{ transaction }`. Use `transaction.mutations` (array of `{ type, key, modified, changes }`) for your backend payloads.
+- Default is fire-and-forget. Set `awaitPersistence: true` to wait for the handler to complete before marking the operation persisted.
+- Errors are swallowed by default; toggle `swallowPersistenceErrors` to change this behavior. Use `persistenceTimeoutMs` to bound wait time.
+- Handlers run only after local Dexie writes succeed.
+
 ## Live Query Integration
 
 Dexie collections work seamlessly with live queries for reactive data access. You can create filtered, sorted views that automatically update when the underlying data changes.
@@ -266,9 +275,9 @@ import {
   createCollection,
   liveQueryCollectionOptions,
   eq,
-} from "@tanstack/react-db";
-import { dexieCollectionOptions } from "tanstack-dexie-db-collection";
-import { z } from "zod";
+} from "@tanstack/react-db"
+import { dexieCollectionOptions } from "tanstack-dexie-db-collection"
+import { z } from "zod"
 
 const noteSchema = z.object({
   id: z.string(),
@@ -276,7 +285,7 @@ const noteSchema = z.object({
   content: z.string(),
   isPinned: z.boolean(),
   updatedAt: z.date(),
-});
+})
 
 // Base collection with Dexie persistence
 const notesCollection = createCollection(
@@ -285,7 +294,7 @@ const notesCollection = createCollection(
     schema: noteSchema,
     getKey: (note) => note.id,
   })
-);
+)
 
 // Live query for pinned notes
 export const pinnedNotesCollection = createCollection(
@@ -298,11 +307,11 @@ export const pinnedNotesCollection = createCollection(
         .where(({ note }) => eq(note.isPinned, true))
         .orderBy(({ note }) => note.updatedAt, "desc"),
   })
-);
+)
 
 // Use in React component
 function PinnedNotes() {
-  const { data: pinnedNotes } = useLiveQuery(pinnedNotesCollection);
+  const { data: pinnedNotes } = useLiveQuery(pinnedNotesCollection)
 
   return (
     <div>
@@ -310,7 +319,7 @@ function PinnedNotes() {
         <div key={note.id}>{note.title}</div>
       ))}
     </div>
-  );
+  )
 }
 ```
 
@@ -322,14 +331,14 @@ import {
   liveQueryCollectionOptions,
   eq,
   gt,
-} from "@tanstack/react-db";
-import { z } from "zod";
+} from "@tanstack/react-db"
+import { z } from "zod"
 
 const userSchema = z.object({
   id: z.string(),
   name: z.string(),
   isActive: z.boolean(),
-});
+})
 
 const taskSchema = z.object({
   id: z.string(),
@@ -337,7 +346,7 @@ const taskSchema = z.object({
   userId: z.string(),
   priority: z.number(),
   dueDate: z.date(),
-});
+})
 
 // Base collections
 const usersCollection = createCollection(
@@ -346,7 +355,7 @@ const usersCollection = createCollection(
     schema: userSchema,
     getKey: (user) => user.id,
   })
-);
+)
 
 const tasksCollection = createCollection(
   dexieCollectionOptions({
@@ -354,7 +363,7 @@ const tasksCollection = createCollection(
     schema: taskSchema,
     getKey: (task) => task.id,
   })
-);
+)
 
 // Live query for active user tasks
 export const activeUserTasksCollection = createCollection(
@@ -378,11 +387,11 @@ export const activeUserTasksCollection = createCollection(
         }))
         .orderBy(({ task }) => task.dueDate, "asc"),
   })
-);
+)
 
 // Use in component
 function HighPriorityTasks() {
-  const { data: tasks } = useLiveQuery(activeUserTasksCollection);
+  const { data: tasks } = useLiveQuery(activeUserTasksCollection)
 
   return (
     <div>
@@ -396,7 +405,7 @@ function HighPriorityTasks() {
         </div>
       ))}
     </div>
-  );
+  )
 }
 ```
 
