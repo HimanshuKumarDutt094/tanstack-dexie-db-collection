@@ -2,11 +2,11 @@ import "./fake-db"
 
 import { afterEach, describe, expect, it } from "vitest"
 import { createCollection } from "@tanstack/db"
+import Dexie from "dexie"
 import { dexieCollectionOptions } from "../src"
 import {
   cleanupTestResources,
   createTestState,
-  getDexie,
   waitForBothCollections,
   waitForCollectionSize,
 } from "./test-helpers"
@@ -193,7 +193,6 @@ describe(`Dexie Bulk Operations Stress Testing`, () => {
     const dbNameBase = `concurrent-bulk-test-${Date.now()}-${Math.random()
       .toString(36)
       .slice(2)}`
-    const Dexie = await getDexie()
 
     // Create multiple collections pointing to same database
     const collections = []
@@ -262,12 +261,9 @@ describe(`Dexie Bulk Operations Stress Testing`, () => {
 
     // Cleanup
     for (const db of databases) {
-      await db.close()
-      try {
-        await Dexie.delete(db.name)
-      } catch {
-        // ignore
-      }
+      db.close()
+
+      await Dexie.delete(db.name)
     }
   })
 

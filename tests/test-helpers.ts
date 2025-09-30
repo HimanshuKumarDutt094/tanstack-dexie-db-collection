@@ -3,8 +3,8 @@ import "fake-indexeddb/auto"
 import "./fake-db"
 import { createCollection } from "@tanstack/db"
 import { z } from "zod"
+import Dexie from "dexie"
 import { dexieCollectionOptions } from "../src/dexie"
-import type Dexie from "dexie"
 
 /**
  * Centralized function to ensure IndexedDB is available in test environment
@@ -34,9 +34,9 @@ export function ensureIndexedDB(): void {
  * Safely import Dexie after ensuring IndexedDB is available
  * This replaces the inline imports scattered throughout test files
  */
-export async function getDexie() {
+export function getDexie() {
   ensureIndexedDB()
-  const { default: Dexie } = await import(`dexie`)
+
   return Dexie
 }
 
@@ -177,8 +177,8 @@ export async function createDexieDatabase(
   initialDocs: Array<TestItem> = [],
   id = dbId++
 ) {
+  ensureIndexedDB()
   const name = DB_PREFIX + id
-  const Dexie = await getDexie()
   const db = new Dexie(name)
   // Include metadata indexes to match the collection implementation
   // which defines the table as `&id, _updatedAt, _createdAt`. This prevents
@@ -237,11 +237,6 @@ export async function cleanupTestResources() {
   for (const db of createdDbs.splice(0)) {
     db.close()
 
-    try {
-      const Dexie = await getDexie()
-      await Dexie.delete(db.name)
-    } catch {
-      // ignore
-    }
+    await Dexie.delete(db.name)
   }
 }

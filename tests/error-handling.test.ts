@@ -1,14 +1,14 @@
 import "./fake-db"
 import { afterEach, describe, expect, it } from "vitest"
 import { createCollection } from "@tanstack/db"
+import Dexie from "dexie"
 import { dexieCollectionOptions } from "../src"
-import { cleanupTestResources, createTestState, getDexie } from "./test-helpers"
+import { cleanupTestResources, createTestState } from "./test-helpers"
 
 describe(`Dexie Error Handling`, () => {
   afterEach(cleanupTestResources)
 
   it(`handles codec parse failures gracefully`, async () => {
-    const Dexie = await getDexie()
     const dbName = `strict-test-${Date.now()}`
     const db = new Dexie(dbName)
     db.version(1).stores({ test: `&id, updatedAt` })
@@ -61,7 +61,6 @@ describe(`Dexie Error Handling`, () => {
   })
 
   it(`handles database connection failures`, async () => {
-    const Dexie = await getDexie()
     const dbName = `fail-test-${Date.now()}`
     const db = new Dexie(dbName)
     db.version(1).stores({ test: `&id, updatedAt` })
@@ -76,7 +75,7 @@ describe(`Dexie Error Handling`, () => {
     const collection = createCollection(options)
 
     // Close the database while collection is active
-    await db.close()
+    db.close()
 
     // Operations should handle the closed database gracefully
     let insertError = null
@@ -339,12 +338,8 @@ describe(`Dexie Error Handling`, () => {
     await finalTx.isPersisted.promise
     expect(collection.get(`final`)).toBeTruthy()
 
-    await db.close()
-    try {
-      const dexie = await getDexie()
-      await dexie.delete(db.name)
-    } catch {
-      // ignore
-    }
+    db.close()
+
+    await Dexie.delete(db.name)
   })
 })

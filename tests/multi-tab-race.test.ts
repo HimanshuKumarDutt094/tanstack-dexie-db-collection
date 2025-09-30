@@ -1,5 +1,6 @@
 import "./fake-db"
 import { afterEach, describe, expect, it } from "vitest"
+import Dexie from "dexie"
 import {
   cleanupTestResources,
   createMultiTabState,
@@ -42,14 +43,10 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
     const cleanDbRow = dbRow ? { id: dbRow.id, name: dbRow.name } : dbRow
     expect(cleanDbRow).toEqual(finalValueA)
 
-    await dbA.close()
-    await dbB.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(dbA.name)
-    } catch {
-      // ignore
-    }
+    dbA.close()
+    dbB.close()
+
+    await Dexie.delete(dbA.name)
   })
 
   it(`handles concurrent delete operations on same key`, async () => {
@@ -86,14 +83,10 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
     const dbRow = await dbA.table(`test`).get(`delete-me`)
     expect(dbRow).toBeUndefined()
 
-    await dbA.close()
-    await dbB.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(dbA.name)
-    } catch {
-      // ignore
-    }
+    dbA.close()
+    dbB.close()
+
+    await Dexie.delete(dbA.name)
   })
 
   it(`handles rapid alternating inserts and deletes`, async () => {
@@ -153,14 +146,10 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
       expect(finalA.name).toMatch(/[AB]-insert-2/)
     }
 
-    await dbA.close()
-    await dbB.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(dbA.name)
-    } catch {
-      // ignore
-    }
+    dbA.close()
+    dbB.close()
+
+    await Dexie.delete(dbA.name)
   })
 
   it(`handles bulk insert race conditions with overlapping keys`, async () => {
@@ -220,10 +209,9 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
     expect(colA.get(`1`)?.name).toBe(`Item 1 from A`)
     expect(colA.get(`15`)?.name).toBe(`Item 15 from B`)
 
-    await dbA.close()
-    await dbB.close()
+    dbA.close()
+    dbB.close()
     try {
-      const { default: Dexie } = await import(`dexie`)
       await Dexie.delete(dbA.name)
     } catch {
       // ignore
@@ -274,14 +262,10 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
     // Should have one of the updates (last writer wins)
     expect(finalValueA?.name).toMatch(/Updated by [AB]/)
 
-    await dbA.close()
-    await dbB.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(dbA.name)
-    } catch {
-      // ignore
-    }
+    dbA.close()
+    dbB.close()
+
+    await Dexie.delete(dbA.name)
   })
 
   it(`maintains cross-instance consistency with awaitIds`, async () => {
@@ -328,14 +312,10 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
 
     expect(colA.has(`await-test`)).toBe(false)
 
-    await dbA.close()
-    await dbB.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(dbA.name)
-    } catch {
-      // ignore
-    }
+    dbA.close()
+    dbB.close()
+
+    await Dexie.delete(dbA.name)
   })
 
   it(`handles rapid fire operations between multiple instances`, async () => {
@@ -382,13 +362,9 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
       expect(colA.get(itemId)).toEqual(colB.get(itemId))
     }
 
-    await dbA.close()
-    await dbB.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(dbA.name)
-    } catch {
-      // ignore
-    }
+    dbA.close()
+    dbB.close()
+
+    await Dexie.delete(dbA.name)
   })
 })

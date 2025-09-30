@@ -1,6 +1,7 @@
 import "./fake-db"
 import { createCollection } from "@tanstack/db"
 import { afterEach, describe, expect, it } from "vitest"
+import Dexie from "dexie"
 import { dexieCollectionOptions } from "../src"
 import {
   TestItemSchema,
@@ -30,12 +31,8 @@ describe(`Dexie Basic Operations`, () => {
     expect(collection.get(`x1`)).toBeUndefined()
 
     await db.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(db.name)
-    } catch {
-      // ignore
-    }
+
+    await Dexie.delete(db.name)
   })
 
   it(`should restart sync when collection is accessed after cleanup`, async () => {
@@ -83,7 +80,6 @@ describe(`Dexie Basic Operations`, () => {
     expect(restarted.get(`3`)?.name).toEqual(`Item 3`)
     db.close()
     try {
-      const { default: Dexie } = await import(`dexie`)
       await Dexie.delete(db.name)
     } catch {
       // ignore
@@ -99,12 +95,8 @@ describe(`Dexie Basic Operations`, () => {
     expect(collection.get(`2`)).toEqual(initial[1])
 
     await db.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(db.name)
-    } catch {
-      // ignore
-    }
+
+    await Dexie.delete(db.name)
   }, 20000)
 
   it(`handles many documents across batches`, async () => {
@@ -117,12 +109,8 @@ describe(`Dexie Basic Operations`, () => {
     expect(collection.get(`25`)).toEqual(docs[24])
 
     db.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(db.name)
-    } catch {
-      // ignore
-    }
+
+    await Dexie.delete(db.name)
   }, 20000)
 
   it(`updates when dexie table is changed (put/delete broadcast)`, async () => {
@@ -154,12 +142,8 @@ describe(`Dexie Basic Operations`, () => {
     expect(collection.get(`3`)).toBeUndefined()
 
     db.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(db.name)
-    } catch {
-      // ignore
-    }
+
+    await Dexie.delete(db.name)
   }, 20000)
 
   it(`collection writes persist to dexie via mutation handlers`, async () => {
@@ -194,12 +178,8 @@ describe(`Dexie Basic Operations`, () => {
     expect(afterDel).toBeUndefined()
 
     await db.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(db.name)
-    } catch {
-      // ignore
-    }
+
+    await Dexie.delete(db.name)
   }, 20000)
 
   it(`restarted collection fetches existing DB state after cleanup`, async () => {
@@ -237,12 +217,8 @@ describe(`Dexie Basic Operations`, () => {
     expect(restarted.get(`3`)?.name).toBe(initial[2]?.name)
 
     db.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(db.name)
-    } catch {
-      // ignore
-    }
+
+    await Dexie.delete(db.name)
   })
 
   it(`should validate data using the provided schema`, async () => {
@@ -277,12 +253,8 @@ describe(`Dexie Basic Operations`, () => {
     }
 
     await db.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(db.name)
-    } catch {
-      // ignore
-    }
+
+    await Dexie.delete(db.name)
   })
 
   it(`should support both schema-first and explicit type patterns`, async () => {
@@ -339,12 +311,8 @@ describe(`Dexie Basic Operations`, () => {
     expect(explicitCollection.get(`e1`)?.name).toBe(`Explicit Item`)
 
     await db1.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(db1.name)
-    } catch {
-      // ignore
-    }
+
+    await Dexie.delete(db1.name)
   })
 
   it(`uses codec parse/serialize when provided`, async () => {
@@ -385,12 +353,8 @@ describe(`Dexie Basic Operations`, () => {
     expect(row?.name).toBe(`orig-S`)
 
     db.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(db.name)
-    } catch {
-      // ignore
-    }
+
+    await Dexie.delete(db.name)
   })
 
   it(`rowUpdateMode 'full' exercises full-replacement update path`, async () => {
@@ -420,12 +384,8 @@ describe(`Dexie Basic Operations`, () => {
     expect(row?.name).toBe(`updated-full`)
 
     db.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(db.name)
-    } catch {
-      // ignore
-    }
+
+    await Dexie.delete(db.name)
   })
 
   it(`utils.awaitIds rejects on timeout when id never seen`, async () => {
@@ -450,26 +410,19 @@ describe(`Dexie Basic Operations`, () => {
     await expect(utilsAny.awaitIds?.([`nope`], 50)).rejects.toThrow()
 
     db.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(db.name)
-    } catch {
-      // ignore
-    }
+
+    await Dexie.delete(db.name)
   })
 
   it(`utils.getTable returns the Dexie table object`, async () => {
     const { collection, db } = await createTestState()
-    const utils = collection.utils as unknown as { getTable: () => any }
+    const utils = collection.utils
     const table = utils.getTable()
+    table.add({ id: `x1`, name: `direct-table-insert` })
     expect(typeof table.toArray).toBe(`function`)
 
     db.close()
-    try {
-      const { default: Dexie } = await import(`dexie`)
-      await Dexie.delete(db.name)
-    } catch {
-      // ignore
-    }
+
+    await Dexie.delete(db.name)
   })
 })

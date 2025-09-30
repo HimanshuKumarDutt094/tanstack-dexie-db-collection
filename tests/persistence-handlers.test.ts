@@ -210,7 +210,7 @@ describe(`Dexie persistence handlers`, () => {
     await col.stateWhenReady()
 
     // monkeypatch bulkPut to throw on the collection's table
-    const table = col.utils.getTable() as any
+    const table = col.utils.getTable()
     const orig = table.bulkPut
     table.bulkPut = () => {
       throw new Error(`simulated-bulkput-failure`)

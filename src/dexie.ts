@@ -36,7 +36,7 @@ export interface DexieCodec<TItem, TStored = TItem> {
  */
 export interface DexieCollectionConfig<
   TItem extends object = Record<string, unknown>,
-  TSchema extends StandardSchemaV1 = never
+  TSchema extends StandardSchemaV1 = never,
 > extends Omit<
     CollectionConfig<TItem, string | number, TSchema>,
     `onInsert` | `onUpdate` | `onDelete` | `getKey` | `sync`
@@ -102,7 +102,7 @@ export function dexieCollectionOptions<T extends object>(
 
 export function dexieCollectionOptions<
   TItem extends object = Record<string, unknown>,
-  TSchema extends StandardSchemaV1 = never
+  TSchema extends StandardSchemaV1 = never,
 >(
   config: DexieCollectionConfig<TItem, TSchema>
 ): CollectionConfig<TItem, string | number, TSchema> & { utils: DexieUtils } {
