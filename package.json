@@ -22,6 +22,7 @@
     "eslint-plugin-prettier": "^5.5.4",
     "fake-indexeddb": "^6.2.2",
     "jsdom": "^27.0.0",
+    "prettier": "^3.6.2",
     "vite": "link:@tanstack/config/vite",
     "vitest": "^3.2.4",
     "zod": "^4"

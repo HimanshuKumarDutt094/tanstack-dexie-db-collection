@@ -297,10 +297,316 @@ function ChatWindow({ chatId }: { chatId: string }) {
 
 ---
 
+## Bootstrap from Server (Initial Data Load)
+
+```typescript
+const productsCollection = createCollection(
+  dexieCollectionOptions({
+    id: "products",
+    schema: productSchema,
+    getKey: (product) => product.id,
+
+    // Handlers for user-initiated changes
+    onInsert: async ({ transaction }) => {
+      await api.products.create(transaction.mutations[0].modified)
+    },
+  })
+)
+
+// Bootstrap function - loads initial data without triggering onInsert
+async function bootstrapProducts() {
+  const lastSync = localStorage.getItem("products-last-sync")
+
+  // Fetch all products from server
+  const serverProducts = await fetch("/api/products").then((r) => r.json())
+
+  // Write directly to local storage without triggering handlers
+  await productsCollection.utils.bulkInsertLocally(serverProducts)
+
+  localStorage.setItem("products-last-sync", new Date().toISOString())
+  console.log(`Bootstrapped ${serverProducts.length} products`)
+}
+
+// Call on app startup
+bootstrapProducts()
+```
+
+---
+
+## Incremental Sync from Server
+
+```typescript
+const notesCollection = createCollection(
+  dexieCollectionOptions({
+    id: "notes",
+    schema: noteSchema,
+    getKey: (note) => note.id,
+
+    onInsert: async ({ transaction }) => {
+      await api.notes.create(transaction.mutations[0].modified)
+    },
+    onUpdate: async ({ transaction }) => {
+      await api.notes.update(
+        transaction.mutations[0].key,
+        transaction.mutations[0].changes
+      )
+    },
+    onDelete: async ({ transaction }) => {
+      await api.notes.delete(transaction.mutations[0].key)
+    },
+  })
+)
+
+// Incremental sync - only fetch changes since last sync
+async function syncNotes() {
+  const lastSync = localStorage.getItem("notes-last-sync")
+
+  // Fetch only changes since last sync
+  const changes = await fetch(
+    `/api/notes/changes?since=${lastSync}`
+  ).then((r) => r.json())
+
+  // Apply changes locally without triggering handlers
+  if (changes.created.length > 0) {
+    await notesCollection.utils.bulkInsertLocally(changes.created)
+  }
+
+  if (changes.updated.length > 0) {
+    await notesCollection.utils.bulkUpdateLocally(changes.updated)
+  }
+
+  if (changes.deleted.length > 0) {
+    await notesCollection.utils.bulkDeleteLocally(changes.deleted)
+  }
+
+  localStorage.setItem("notes-last-sync", new Date().toISOString())
+  console.log(
+    `Synced: ${changes.created.length} created, ${changes.updated.length} updated, ${changes.deleted.length} deleted`
+  )
+}
+
+// Sync periodically
+setInterval(syncNotes, 60000) // Every minute
+```
+
+---
+
+## WebSocket Real-time Updates
+
+```typescript
+const messagesCollection = createCollection(
+  dexieCollectionOptions({
+    id: "messages",
+    schema: messageSchema,
+    getKey: (message) => message.id,
+
+    // Handler for user sending messages
+    onInsert: async ({ transaction }) => {
+      const message = transaction.mutations[0].modified
+      await api.messages.send(message)
+    },
+  })
+)
+
+// WebSocket connection for real-time updates from other users
+const ws = new WebSocket("wss://api.example.com/messages")
+
+ws.onmessage = async (event) => {
+  const update = JSON.parse(event.data)
+
+  switch (update.type) {
+    case "message:created":
+      // Write directly without triggering onInsert
+      await messagesCollection.utils.insertLocally(update.message)
+      break
+
+    case "message:updated":
+      await messagesCollection.utils.updateLocally(
+        update.message.id,
+        update.message
+      )
+      break
+
+    case "message:deleted":
+      await messagesCollection.utils.deleteLocally(update.messageId)
+      break
+
+    case "messages:bulk":
+      // Handle bulk updates efficiently
+      await messagesCollection.utils.bulkInsertLocally(update.messages)
+      break
+  }
+}
+
+// User sends a message (triggers onInsert handler)
+async function sendMessage(content: string) {
+  await messagesCollection.insert({
+    id: crypto.randomUUID(),
+    content,
+    senderId: getCurrentUserId(),
+    timestamp: new Date(),
+  })
+}
+```
+
+---
+
+## Offline-First with Background Sync
+
+```typescript
+const tasksCollection = createCollection(
+  dexieCollectionOptions({
+    id: "tasks",
+    schema: taskSchema,
+    getKey: (task) => task.id,
+
+    // Fire-and-forget sync to server
+    awaitPersistence: false,
+    swallowPersistenceErrors: true,
+
+    onInsert: async ({ transaction }) => {
+      try {
+        await api.tasks.create(transaction.mutations[0].modified)
+      } catch (error) {
+        console.error("Failed to sync task to server:", error)
+        // Task is still saved locally
+      }
+    },
+  })
+)
+
+// Bootstrap on app start
+async function initializeTasks() {
+  try {
+    // Fetch latest from server
+    const serverTasks = await api.tasks.list()
+
+    // Merge with local data (server is source of truth)
+    await tasksCollection.utils.bulkInsertLocally(serverTasks)
+
+    console.log("Tasks synchronized")
+  } catch (error) {
+    console.log("Offline mode - using local data")
+  }
+}
+
+// Periodic background sync
+async function backgroundSync() {
+  if (!navigator.onLine) return
+
+  try {
+    const lastSync = localStorage.getItem("tasks-last-sync")
+    const changes = await api.tasks.changes(lastSync)
+
+    await tasksCollection.utils.bulkInsertLocally(changes.created)
+    await tasksCollection.utils.bulkUpdateLocally(changes.updated)
+    await tasksCollection.utils.bulkDeleteLocally(changes.deleted)
+
+    localStorage.setItem("tasks-last-sync", new Date().toISOString())
+  } catch (error) {
+    console.error("Background sync failed:", error)
+  }
+}
+
+// Initialize and start background sync
+initializeTasks()
+setInterval(backgroundSync, 30000) // Every 30 seconds
+```
+
+---
+
+## Server-Sent Events (SSE) Integration
+
+```typescript
+const notificationsCollection = createCollection(
+  dexieCollectionOptions({
+    id: "notifications",
+    schema: notificationSchema,
+    getKey: (notification) => notification.id,
+
+    // Handler for user marking notifications as read
+    onUpdate: async ({ transaction }) => {
+      const mutation = transaction.mutations[0]
+      await api.notifications.markRead(mutation.key)
+    },
+  })
+)
+
+// SSE connection for real-time notifications
+const eventSource = new EventSource("/api/notifications/stream")
+
+eventSource.addEventListener("notification", async (event) => {
+  const notification = JSON.parse(event.data)
+
+  // Write directly without triggering handlers
+  await notificationsCollection.utils.insertLocally(notification)
+
+  // Show browser notification
+  if (Notification.permission === "granted") {
+    new Notification(notification.title, {
+      body: notification.message,
+    })
+  }
+})
+
+eventSource.addEventListener("notification:read", async (event) => {
+  const { id } = JSON.parse(event.data)
+  await notificationsCollection.utils.updateLocally(id, {
+    id,
+    read: true,
+    readAt: new Date(),
+  })
+})
+
+// User marks notification as read (triggers onUpdate handler)
+async function markAsRead(notificationId: string) {
+  await notificationsCollection.update(notificationId, (notification) => {
+    notification.read = true
+    notification.readAt = new Date()
+  })
+}
+```
+
+---
+
+## Comparison: Regular vs Local Write Utilities
+
+```typescript
+const collection = createCollection(
+  dexieCollectionOptions({
+    id: "items",
+    getKey: (item) => item.id,
+
+    onInsert: async ({ transaction }) => {
+      console.log("onInsert called - syncing to server")
+      await api.items.create(transaction.mutations[0].modified)
+    },
+  })
+)
+
+// ❌ Regular insert - triggers onInsert handler
+await collection.insert({ id: "1", name: "Item 1" })
+// Console: "onInsert called - syncing to server"
+
+// ✅ Local insert - does NOT trigger onInsert handler
+await collection.utils.insertLocally({ id: "2", name: "Item 2" })
+// No console output - handler not called
+
+// Use cases:
+// - Regular insert: User creates new item → sync to server
+// - Local insert: Server sends new item → write locally only
+```
+
+---
+
 ## Notes
 
 - These examples are intentionally compact — they demonstrate the shape and usage
   of `dexieCollectionOptions` and the recommended patterns (optimistic vs awaited
-  persistence, codecs, update modes). For full app code, copy the snippet and adapt.
+  persistence, codecs, update modes, local write utilities).
+- **Local write utilities** (`insertLocally`, `updateLocally`, `deleteLocally`) are
+  essential for bootstrap, sync, and real-time update scenarios where you want to
+  write data locally without triggering persistence handlers.
+- For full app code, copy the snippet and adapt to your needs.
 
 ---
