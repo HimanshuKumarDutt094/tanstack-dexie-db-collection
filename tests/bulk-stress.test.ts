@@ -6,6 +6,7 @@ import Dexie from "dexie"
 import { dexieCollectionOptions } from "../src"
 import {
   cleanupTestResources,
+  createNumericTestState,
   createTestState,
   waitForBothCollections,
   waitForCollectionSize,
@@ -505,4 +506,97 @@ describe(`Dexie Bulk Operations Stress Testing`, () => {
     const retrievalDuration = Date.now() - retrievalStart
     console.log(`Retrieved 50 random items in ${retrievalDuration}ms`)
   }, 15000) // Increase timeout to 15 seconds for this performance test
+
+  describe(`getNextId stress testing`, () => {
+    it(`generates 100 sequential IDs rapidly`, async () => {
+      const { collection, db } = await createNumericTestState()
+
+      const count = 100
+      const start = Date.now()
+
+      const ids = []
+      for (let i = 0; i < count; i++) {
+        ids.push(await collection.utils.getNextId())
+      }
+
+      const duration = Date.now() - start
+      console.log(`Generated ${count} IDs in ${duration}ms`)
+
+      expect(ids).toEqual(Array.from({ length: count }, (_, i) => i + 1))
+      expect(duration).toBeLessThan(1000)
+
+      await db.close()
+      await Dexie.delete(db.name)
+    })
+
+    it(`handles concurrent ID generation under load`, async () => {
+      const { collection, db } = await createNumericTestState()
+
+      const count = 50
+      const promises = Array.from({ length: count }, () =>
+        collection.utils.getNextId()
+      )
+
+      const start = Date.now()
+      const ids = await Promise.all(promises)
+      const duration = Date.now() - start
+
+      console.log(`Generated ${count} concurrent IDs in ${duration}ms`)
+
+      const uniqueIds = new Set(ids)
+      expect(uniqueIds.size).toBe(count)
+
+      await db.close()
+      await Dexie.delete(db.name)
+    })
+
+    it(`stress test: 500 IDs with inserts`, async () => {
+      const { collection, db } = await createNumericTestState()
+
+      const count = 500
+      const start = Date.now()
+
+      for (let i = 0; i < count; i++) {
+        const id = await collection.utils.getNextId()
+        await collection.utils.insertLocally({
+          id,
+          name: `Stress ${id}`,
+        })
+      }
+
+      const duration = Date.now() - start
+      console.log(`Generated and inserted ${count} items in ${duration}ms`)
+
+      await waitForCollectionSize(collection, count, 5000)
+      expect(collection.size).toBe(count)
+
+      await db.close()
+      await Dexie.delete(db.name)
+    }, 10000)
+
+    it(`maintains counter integrity under rapid operations`, async () => {
+      const { collection, db } = await createNumericTestState()
+
+      const operations = []
+      for (let i = 0; i < 30; i++) {
+        operations.push(
+          (async () => {
+            const id = await collection.utils.getNextId()
+            const tx = collection.insert({ id, name: `Item ${id}` })
+            await tx.isPersisted.promise
+            return id
+          })()
+        )
+      }
+
+      const ids = await Promise.all(operations)
+      const uniqueIds = new Set(ids)
+
+      expect(uniqueIds.size).toBe(30)
+      await waitForCollectionSize(collection, 30, 3000)
+
+      await db.close()
+      await Dexie.delete(db.name)
+    })
+  })
 })
