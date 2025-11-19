@@ -4,9 +4,11 @@ import Dexie from "dexie"
 import {
   cleanupTestResources,
   createMultiTabState,
+  createNumericMultiTabState,
   waitForBothCollections,
   waitForKey,
   waitForNoKey,
+  waitForNumericKey,
 } from "./test-helpers"
 import type { TestItem } from "./test-helpers"
 
@@ -366,5 +368,96 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
     dbB.close()
 
     await Dexie.delete(dbA.name)
+  })
+
+  describe(`getNextId multi-tab concurrency`, () => {
+    it(`generates unique IDs across multiple collection instances`, async () => {
+      const { colA, colB, dbA, dbB } = await createNumericMultiTabState()
+
+      const idsA = []
+      const idsB = []
+
+      for (let i = 0; i < 10; i++) {
+        idsA.push(await colA.utils.getNextId())
+      }
+
+      for (let i = 0; i < 10; i++) {
+        idsB.push(await colB.utils.getNextId())
+      }
+
+      const allIds = [...idsA, ...idsB]
+      const uniqueIds = new Set(allIds)
+
+      expect(uniqueIds.size).toBe(20)
+      expect(Math.max(...allIds)).toBe(20)
+
+      dbA.close()
+      dbB.close()
+      await Dexie.delete(dbA.name)
+    })
+
+    it(`handles concurrent getNextId calls from multiple tabs`, async () => {
+      const { colA, colB, dbA, dbB } = await createNumericMultiTabState()
+
+      const promises = [
+        ...Array.from({ length: 15 }, () => colA.utils.getNextId()),
+        ...Array.from({ length: 15 }, () => colB.utils.getNextId()),
+      ]
+
+      const ids = await Promise.all(promises)
+      const uniqueIds = new Set(ids)
+
+      expect(uniqueIds.size).toBe(30)
+
+      dbA.close()
+      dbB.close()
+      await Dexie.delete(dbA.name)
+    })
+
+    it(`maintains counter consistency across tab inserts`, async () => {
+      const { colA, colB, dbA, dbB } = await createNumericMultiTabState()
+
+      const id1 = await colA.utils.getNextId()
+      await colA.utils.insertLocally({ id: id1, name: `Tab A Item` })
+
+      const id2 = await colB.utils.getNextId()
+      await colB.utils.insertLocally({ id: id2, name: `Tab B Item` })
+
+      expect(id1).toBe(1)
+      expect(id2).toBe(2)
+
+      await waitForNumericKey(colA, id1)
+      await waitForNumericKey(colB, id2)
+
+      dbA.close()
+      dbB.close()
+      await Dexie.delete(dbA.name)
+    })
+
+    it(`handles rapid concurrent ID generation`, async () => {
+      const { colA, colB, dbA, dbB } = await createNumericMultiTabState()
+
+      const count = 25
+      const promises = []
+
+      for (let i = 0; i < count; i++) {
+        promises.push(colA.utils.getNextId())
+        promises.push(colB.utils.getNextId())
+      }
+
+      const ids = await Promise.all(promises)
+      const uniqueIds = new Set(ids)
+
+      expect(uniqueIds.size).toBe(count * 2)
+
+      const sortedIds = [...ids].sort((a, b) => a - b)
+      expect(sortedIds).toEqual(
+        Array.from({ length: count * 2 }, (_, i) => i + 1)
+      )
+
+      dbA.close()
+      dbB.close()
+      await Dexie.delete(dbA.name)
+    })
   })
 })

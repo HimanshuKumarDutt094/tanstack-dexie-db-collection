@@ -86,6 +86,9 @@ export interface DexieUtils extends UtilsRecord {
   bulkInsertLocally: (items: Array<any>) => Promise<void>
   bulkUpdateLocally: (items: Array<any>) => Promise<void>
   bulkDeleteLocally: (ids: Array<string | number>) => Promise<void>
+
+  // Sequential ID generation
+  getNextId: () => Promise<number>
 }
 
 /**
@@ -141,6 +144,57 @@ export function dexieCollectionOptions<
   })
 
   const table = db.table(tableName)
+
+  // Special ID for counter record (filtered out from user queries)
+  const COUNTER_ID = `__dexie_counter__`
+
+  /**
+   * Get next sequential ID for items with numeric IDs.
+   *
+   * Maintains an internal counter stored as a special record in the table.
+   * Auto-initializes from existing data on first use.
+   * Thread-safe across tabs via Dexie transactions.
+   *
+   * @returns Promise<number> - Next sequential ID (1, 2, 3, ...)
+   */
+  const getNextId = async (): Promise<number> => {
+    return await db.transaction(`rw`, table, async () => {
+      // Get counter record
+      const counterRecord = await table.get(COUNTER_ID)
+
+      let nextId: number
+
+      if (!counterRecord) {
+        // Initialize: find max user ID from existing records
+        const allRecords = await table.toArray()
+        const userRecords = allRecords.filter((r) => r.id !== COUNTER_ID)
+        const maxId = Math.max(
+          0,
+          ...userRecords.map((r) => (typeof r.id === `number` ? r.id : 0))
+        )
+
+        nextId = maxId + 1
+
+        // Store counter
+        await table.put({
+          id: COUNTER_ID,
+          _value: nextId,
+          _updatedAt: Date.now(),
+          _createdAt: Date.now(),
+        })
+      } else {
+        // Increment counter
+        nextId = (counterRecord._value || 0) + 1
+
+        await table.update(COUNTER_ID, {
+          _value: nextId,
+          _updatedAt: Date.now(),
+        })
+      }
+
+      return nextId
+    })
+  }
 
   const awaitAckedIds = async (
     ids: Array<string | number>,
@@ -449,6 +503,9 @@ export function dexieCollectionOptions<
         const batchSnapshot = new Map<string | number, TItem>()
 
         for (const record of batchRecords) {
+          // Skip counter record
+          if (record.id === COUNTER_ID) continue
+
           const item = parse(record)
 
           const key = config.getKey(item)
@@ -535,6 +592,9 @@ export function dexieCollectionOptions<
         const snapshot = new Map<string | number, TItem>()
 
         for (const record of records) {
+          // Skip counter record
+          if (record.id === COUNTER_ID) continue
+
           let item: TItem
           try {
             item = parse(record)
@@ -801,7 +861,7 @@ export function dexieCollectionOptions<
   const insertLocally = async (item: TItem): Promise<void> => {
     // Validate with schema if provided
     const validated = validateSchema(item)
-    
+
     const serialized = serialize(validated, false)
     const key = config.getKey(validated)
 
@@ -826,7 +886,7 @@ export function dexieCollectionOptions<
     }
 
     triggerRefresh()
-    
+
     // Give liveQuery a moment to process the change
     await new Promise((r) => setTimeout(r, 10))
   }
@@ -935,7 +995,7 @@ export function dexieCollectionOptions<
           updated = await table.update(id, serialized)
         }
       })
-      
+
       // In partial mode, throw if item doesn't exist
       if (config.rowUpdateMode !== `full` && updated === 0) {
         throw new Error(`Item with id "${id}" not found`)
@@ -957,7 +1017,7 @@ export function dexieCollectionOptions<
     }
 
     triggerRefresh()
-    
+
     // Give liveQuery a moment to process the change
     await new Promise((r) => setTimeout(r, 10))
   }
@@ -1111,6 +1171,7 @@ export function dexieCollectionOptions<
     bulkInsertLocally,
     bulkUpdateLocally,
     bulkDeleteLocally,
+    getNextId,
   }
 
   return {

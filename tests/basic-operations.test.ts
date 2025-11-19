@@ -7,11 +7,13 @@ import {
   TestItemSchema,
   cleanupTestResources,
   createDexieDatabase,
+  createNumericTestState,
   createTestState,
   createdCollections,
   getTestData,
   waitForCollectionSize,
   waitForKey,
+  waitForNumericKey,
 } from "./test-helpers"
 import type { TestItem } from "./test-helpers"
 
@@ -424,5 +426,84 @@ describe(`Dexie Basic Operations`, () => {
     db.close()
 
     await Dexie.delete(db.name)
+  })
+
+  describe(`getNextId utility`, () => {
+    it(`generates sequential numeric IDs starting from 1`, async () => {
+      const { collection, db } = await createNumericTestState()
+
+      const id1 = await collection.utils.getNextId()
+      const id2 = await collection.utils.getNextId()
+      const id3 = await collection.utils.getNextId()
+
+      expect(id1).toBe(1)
+      expect(id2).toBe(2)
+      expect(id3).toBe(3)
+
+      db.close()
+      await Dexie.delete(db.name)
+    })
+
+    it(`initializes from max existing numeric ID`, async () => {
+      const initialData = [
+        { id: 5, name: `Item 5` },
+        { id: 10, name: `Item 10` },
+        { id: 3, name: `Item 3` },
+      ]
+      const { collection, db } = await createNumericTestState(initialData)
+
+      const nextId = await collection.utils.getNextId()
+      expect(nextId).toBe(11)
+
+      db.close()
+      await Dexie.delete(db.name)
+    })
+
+    it(`filters counter record from collection`, async () => {
+      const { collection, db } = await createNumericTestState()
+
+      await collection.utils.getNextId()
+      await collection.utils.insertLocally({ id: 1, name: `Real Item` })
+      await waitForNumericKey(collection, 1)
+
+      expect(collection.size).toBe(1)
+      expect(collection.has(1)).toBe(true)
+
+      db.close()
+      await Dexie.delete(db.name)
+    })
+
+    it(`handles deletions without decrementing counter`, async () => {
+      const { collection, db } = await createNumericTestState()
+
+      const id1 = await collection.utils.getNextId()
+      const id2 = await collection.utils.getNextId()
+      await collection.utils.insertLocally({ id: id1, name: `Item 1` })
+      await collection.utils.insertLocally({ id: id2, name: `Item 2` })
+      await waitForCollectionSize(collection, 2)
+
+      await collection.utils.deleteLocally(id1)
+      await waitForCollectionSize(collection, 1)
+
+      const id3 = await collection.utils.getNextId()
+      expect(id3).toBe(3)
+
+      db.close()
+      await Dexie.delete(db.name)
+    })
+
+    it(`works with regular insert operations`, async () => {
+      const { collection, db } = await createNumericTestState()
+
+      const id1 = await collection.utils.getNextId()
+      const tx = collection.insert({ id: id1, name: `Todo 1` })
+      await tx.isPersisted.promise
+
+      await waitForNumericKey(collection, id1)
+      expect(collection.get(id1)?.name).toBe(`Todo 1`)
+
+      db.close()
+      await Dexie.delete(db.name)
+    })
   })
 })

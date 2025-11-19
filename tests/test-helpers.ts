@@ -240,3 +240,124 @@ export async function cleanupTestResources() {
     await Dexie.delete(db.name)
   }
 }
+
+// Numeric ID test utilities for sequential ID testing
+export const NumericItemSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+})
+
+export type NumericItem = z.infer<typeof NumericItemSchema>
+
+export function getNumericTestData(amount: number): Array<NumericItem> {
+  return new Array(amount)
+    .fill(0)
+    .map((_v, i) => ({ id: i + 1, name: `Item ${i + 1}` }))
+}
+
+export async function createNumericTestState(
+  initialDocs: Array<NumericItem> = []
+) {
+  const db = await createDexieDatabase(initialDocs as any)
+  const options = dexieCollectionOptions({
+    id: `test-numeric`,
+    tableName: `test`,
+    dbName: db.name,
+    schema: NumericItemSchema,
+    getKey: (item: NumericItem) => item.id,
+  })
+  const collection = createCollection(options)
+  await collection.stateWhenReady()
+  createdCollections.push(collection)
+
+  const utils = collection.utils as unknown as {
+    refetch?: () => Promise<void>
+    refresh?: () => void
+  }
+  if (utils.refetch) await utils.refetch()
+  else if (utils.refresh) utils.refresh()
+
+  return { collection, db }
+}
+
+export async function waitForNumericKey(
+  collection: any,
+  key: number,
+  timeoutMs = 1000
+) {
+  const utils = collection.utils as unknown as
+    | {
+        awaitIds?: (
+          ids: Array<string | number>,
+          timeoutMs?: number
+        ) => Promise<void>
+      }
+    | undefined
+
+  if (utils?.awaitIds) {
+    await utils.awaitIds([key], timeoutMs)
+    return
+  }
+
+  const start = Date.now()
+  while (!collection.has(key)) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`Timed out waiting for numeric key ${key} in collection`)
+    }
+    await new Promise((r) => setTimeout(r, 20))
+  }
+}
+
+export async function waitForNoNumericKey(
+  collection: any,
+  key: number,
+  timeoutMs = 1000
+) {
+  const start = Date.now()
+  while (collection.has(key)) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(
+        `Timed out waiting for numeric key ${key} to be removed from collection`
+      )
+    }
+    await new Promise((r) => setTimeout(r, 20))
+  }
+}
+
+export async function createNumericMultiTabState(
+  initialA: Array<NumericItem> = [],
+  initialB: Array<NumericItem> = []
+) {
+  const dbid = dbId++
+  const dbA = await createDexieDatabase(initialA as any, dbid)
+  const dbB = await createDexieDatabase(initialB as any, dbid)
+
+  const optsA = dexieCollectionOptions({
+    id: `multi-tab-numeric-a`,
+    tableName: `test`,
+    dbName: dbA.name,
+    schema: NumericItemSchema,
+    getKey: (item: NumericItem) => item.id,
+  })
+
+  const optsB = dexieCollectionOptions({
+    id: `multi-tab-numeric-b`,
+    tableName: `test`,
+    dbName: dbB.name,
+    schema: NumericItemSchema,
+    getKey: (item: NumericItem) => item.id,
+  })
+
+  const colA = createCollection(optsA)
+  const colB = createCollection(optsB)
+  await colA.stateWhenReady()
+  await colB.stateWhenReady()
+  createdCollections.push(colA, colB)
+
+  const utilsA = colA.utils as unknown as { refetch?: () => Promise<void> }
+  const utilsB = colB.utils as unknown as { refetch?: () => Promise<void> }
+  if (utilsA.refetch) await utilsA.refetch()
+  if (utilsB.refetch) await utilsB.refetch()
+
+  return { colA, colB, dbA, dbB }
+}

@@ -362,9 +362,9 @@ async function syncNotes() {
   const lastSync = localStorage.getItem("notes-last-sync")
 
   // Fetch only changes since last sync
-  const changes = await fetch(
-    `/api/notes/changes?since=${lastSync}`
-  ).then((r) => r.json())
+  const changes = await fetch(`/api/notes/changes?since=${lastSync}`).then(
+    (r) => r.json()
+  )
 
   // Apply changes locally without triggering handlers
   if (changes.created.length > 0) {
@@ -610,3 +610,103 @@ await collection.utils.insertLocally({ id: "2", name: "Item 2" })
 - For full app code, copy the snippet and adapt to your needs.
 
 ---
+
+## Sequential ID Generation with getNextId()
+
+**IMPORTANT:** To use `getNextId()`, you MUST set `autoIncrement: true` in your collection options.
+
+```typescript
+import React, { useState } from "react"
+import { createCollection } from "@tanstack/db"
+import { useLiveQuery } from "@tanstack/react-db"
+import { dexieCollectionOptions } from "tanstack-dexie-db-collection"
+import { z } from "zod"
+
+const todoSchema = z.object({
+  id: z.number(), // Use z.number() for sequential IDs
+  text: z.string(),
+  completed: z.boolean(),
+  createdAt: z.date(),
+})
+
+const todosCollection = createCollection(
+  dexieCollectionOptions({
+    id: "todos",
+    schema: todoSchema,
+    getKey: (item) => item.id,
+    autoIncrement: true, // ⚠️ REQUIRED for getNextId()
+
+    onInsert: async ({ transaction }) => {
+      await api.todos.create(transaction.mutations[0].modified)
+    },
+  })
+)
+
+// Single insert
+async function addTodo(text: string) {
+  const id = await todosCollection.utils.getNextId() // Returns 1, 2, 3...
+  await todosCollection.insert({
+    id,
+    text,
+    completed: false,
+    createdAt: new Date(),
+  })
+}
+
+// Bulk insert
+async function bulkAddTodos() {
+  const todos = []
+  for (let i = 0; i < 100; i++) {
+    const id = await todosCollection.utils.getNextId()
+    todos.push({ id, text: `Todo ${id}`, completed: false, createdAt: new Date() })
+  }
+  // Use bulkInsertLocally for efficiency (doesn't trigger handlers)
+  await todosCollection.utils.bulkInsertLocally(todos)
+}
+
+// Bootstrap from server
+async function bootstrapTodos() {
+  const serverTodos = await fetch("/api/todos").then((r) => r.json())
+  // Example: [{ id: 1, ... }, { id: 2, ... }, ..., { id: 100, ... }]
+
+  await todosCollection.utils.bulkInsertLocally(serverTodos)
+  
+  // After bootstrap, getNextId() auto-initializes from max ID
+  // If server had IDs 1-100, next getNextId() returns 101
+}
+
+// React component
+function TodoApp() {
+  const { data: todos = [] } = useLiveQuery(todosCollection)
+  const [text, setText] = useState("")
+
+  const handleAdd = async () => {
+    if (!text.trim()) return
+    await addTodo(text.trim())
+    setText("")
+  }
+
+  return (
+    <div>
+      <h1>Todos</h1>
+      <input value={text} onChange={(e) => setText(e.target.value)} />
+      <button onClick={handleAdd}>Add</button>
+      <ul>
+        {todos.map((todo) => (
+          <li key={todo.id}>
+            #{todo.id} - {todo.text}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+```
+
+### Key Points
+
+1. **Always set `autoIncrement: true`** when using `getNextId()`
+2. **Use `z.number()` for ID field** in your schema
+3. **Counter auto-initializes** from max existing ID on bootstrap
+4. **Counter never decreases** - deleted IDs are never reused (gaps are normal)
+5. **Multi-tab safe** - Dexie transactions prevent duplicate IDs across browser tabs

@@ -5,6 +5,7 @@ import { createCollection } from "@tanstack/db"
 import { dexieCollectionOptions } from "../src"
 import {
   cleanupTestResources,
+  createNumericTestState,
   createTestState,
   getTestData,
   waitForCollectionSize,
@@ -766,6 +767,103 @@ describe(`Dexie Local Write Utilities`, () => {
 
       await db1.close()
       await db2.close()
+    })
+  })
+
+  describe(`getNextId with bulk operations`, () => {
+    it(`generates IDs for bulk insert`, async () => {
+      const { collection, db } = await createNumericTestState()
+      const utils = collection.utils
+
+      const items = []
+      for (let i = 0; i < 10; i++) {
+        const id = await utils.getNextId()
+        items.push({ id, name: `Item ${id}` })
+      }
+
+      await utils.bulkInsertLocally(items)
+      await waitForCollectionSize(collection, 10)
+
+      expect(collection.size).toBe(10)
+      for (let i = 1; i <= 10; i++) {
+        expect(collection.has(i)).toBe(true)
+      }
+
+      await db.close()
+    })
+
+    it(`handles mixed bulk operations with sequential IDs`, async () => {
+      const { collection, db } = await createNumericTestState()
+      const utils = collection.utils
+
+      const initialItems = []
+      for (let i = 0; i < 5; i++) {
+        const id = await utils.getNextId()
+        initialItems.push({ id, name: `Initial ${id}` })
+      }
+
+      await utils.bulkInsertLocally(initialItems)
+      await waitForCollectionSize(collection, 5)
+
+      await utils.bulkDeleteLocally([2, 3])
+      await waitForCollectionSize(collection, 3)
+
+      const newItems = []
+      for (let i = 0; i < 3; i++) {
+        const id = await utils.getNextId()
+        newItems.push({ id, name: `New ${id}` })
+      }
+      await utils.bulkInsertLocally(newItems)
+      await waitForCollectionSize(collection, 6)
+
+      expect(collection.has(6)).toBe(true)
+      expect(collection.has(7)).toBe(true)
+      expect(collection.has(8)).toBe(true)
+
+      await db.close()
+    })
+
+    it(`stress test with 200 sequential IDs`, async () => {
+      const { collection, db } = await createNumericTestState()
+      const utils = collection.utils
+
+      const count = 200
+      const items = []
+
+      for (let i = 0; i < count; i++) {
+        const id = await utils.getNextId()
+        items.push({ id, name: `Stress ${id}` })
+      }
+
+      await utils.bulkInsertLocally(items)
+      await waitForCollectionSize(collection, count, 3000)
+
+      expect(collection.size).toBe(count)
+      for (let i = 1; i <= count; i++) {
+        expect(collection.has(i)).toBe(true)
+      }
+
+      await db.close()
+    })
+
+    it(`works with bootstrap then new inserts`, async () => {
+      const { collection, db } = await createNumericTestState()
+      const utils = collection.utils
+
+      const serverData = [
+        { id: 1, name: `Server 1` },
+        { id: 2, name: `Server 2` },
+      ]
+      await utils.bulkInsertLocally(serverData)
+      await waitForCollectionSize(collection, 2)
+
+      const nextId = await utils.getNextId()
+      expect(nextId).toBe(3)
+
+      await utils.insertLocally({ id: nextId, name: `User 3` })
+      await waitForCollectionSize(collection, 3)
+
+      await db.close()
     })
   })
 })

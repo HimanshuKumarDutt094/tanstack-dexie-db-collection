@@ -251,6 +251,65 @@ todosCollection.utils.refresh()
 await todosCollection.utils.refetch()
 ```
 
+### Sequential ID Generation
+
+For collections that need sequential numeric IDs (1, 2, 3...) instead of UUIDs, use the `getNextId()` utility:
+
+```typescript
+import { z } from "zod"
+
+// Schema with numeric ID
+const todoSchema = z.object({
+  id: z.number(),
+  text: z.string(),
+  completed: z.boolean(),
+})
+
+const todosCollection = createCollection(
+  dexieCollectionOptions({
+    id: "todos",
+    schema: todoSchema,
+    getKey: (item) => item.id,
+  })
+)
+
+// Generate sequential IDs
+async function addTodo(text: string) {
+  const nextId = await todosCollection.utils.getNextId()
+
+  const tx = todosCollection.insert({
+    id: nextId, // 1, 2, 3, 4...
+    text,
+    completed: false,
+  })
+
+  await tx.isPersisted.promise
+}
+
+// Usage
+await addTodo("Buy milk") // Creates todo with id: 1
+await addTodo("Walk dog") // Creates todo with id: 2
+await addTodo("Write code") // Creates todo with id: 3
+```
+
+**Features:**
+- Auto-initializes from max existing ID on first use
+- Thread-safe across browser tabs via Dexie transactions
+- Counter never decreases (deletions create gaps, which is normal)
+- Stored internally as a special record (filtered from queries)
+
+**Example with bootstrap:**
+
+```typescript
+// Bootstrap from server
+const serverTodos = await fetch("/api/todos").then((r) => r.json())
+await todosCollection.utils.bulkInsertLocally(serverTodos)
+// If server has IDs 1-100, counter initializes to 100
+
+// Create new todo
+const nextId = await todosCollection.utils.getNextId() // Returns 101
+```
+
 ## External backend sync
 
 This repo includes copy-paste-ready examples for persistence handlers and backend sync in `EXAMPLES.md` (project root). See that file for complete snippets. Minimal summary:
