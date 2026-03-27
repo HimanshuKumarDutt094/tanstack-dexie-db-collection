@@ -16,8 +16,8 @@
     {
       "type": "library",
       "name": "@tanstack/db",
-      "version": "0.6.0(typescript@5.8.3)",
-      "bomRef": "pkg:npm/@tanstack/db@0.6.0(typescript@5.8.3)",
+      "version": "0.1.4(typescript@5.8.3)",
+      "bomRef": "pkg:npm/@tanstack/db@0.1.4(typescript@5.8.3)",
       "externalReferences": [],
       "repository": {
         "url": "git+https://github.com/TanStack/db.git"

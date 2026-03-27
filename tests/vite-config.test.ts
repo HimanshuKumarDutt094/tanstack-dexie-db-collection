@@ -1,6 +1,6 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { readFileSync } from "fs"
-import { join } from "path"
 
 /**
  * Tests for vite.config.ts configuration
@@ -24,9 +24,7 @@ describe(`Vite Configuration`, () => {
     const configContent = readFileSync(configPath, `utf-8`)
 
     // Should import tanstack config
-    expect(configContent).toContain(
-      `from "@tanstack/config/vite"`
-    )
+    expect(configContent).toContain(`from "@tanstack/config/vite"`)
     expect(configContent).toContain(`tanstackViteConfig`)
 
     // Should use mergeConfig

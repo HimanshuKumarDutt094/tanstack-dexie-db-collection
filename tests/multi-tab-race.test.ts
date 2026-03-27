@@ -37,8 +37,12 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
     const finalValueA = colA.get(`race-1`)
     const finalValueB = colB.get(`race-1`)
     // Compare only data fields, ignoring internal metadata ($collectionId, $key, etc.)
-    const dataA = finalValueA ? { id: finalValueA.id, name: finalValueA.name } : null
-    const dataB = finalValueB ? { id: finalValueB.id, name: finalValueB.name } : null
+    const dataA = finalValueA
+      ? { id: finalValueA.id, name: finalValueA.name }
+      : null
+    const dataB = finalValueB
+      ? { id: finalValueB.id, name: finalValueB.name }
+      : null
     expect(dataA).toEqual(dataB)
     expect(dataA?.name).toMatch(/Collection [AB]/)
 
@@ -272,8 +276,12 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
     const finalValueA = colA.get(`update-me`)
     const finalValueB = colB.get(`update-me`)
     // Compare only data fields, ignoring internal metadata
-    const dataA = finalValueA ? { id: finalValueA.id, name: finalValueA.name } : null
-    const dataB = finalValueB ? { id: finalValueB.id, name: finalValueB.name } : null
+    const dataA = finalValueA
+      ? { id: finalValueA.id, name: finalValueA.name }
+      : null
+    const dataB = finalValueB
+      ? { id: finalValueB.id, name: finalValueB.name }
+      : null
     expect(dataA).toEqual(dataB)
 
     // Should have one of the updates (last writer wins)

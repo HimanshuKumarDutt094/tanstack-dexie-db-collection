@@ -1,6 +1,6 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { readFileSync } from "fs"
-import { join } from "path"
 
 /**
  * Tests for eslint.config.mjs configuration
@@ -44,7 +44,9 @@ describe(`ESLint Configuration`, () => {
       `import stylisticPlugin from "@stylistic/eslint-plugin"`
     )
     expect(configContent).toContain(`stylistic: stylisticPlugin`)
-    expect(configContent).toContain(`"stylistic/quotes": [\`error\`, \`backtick\`]`)
+    expect(configContent).toContain(
+      `"stylistic/quotes": [\`error\`, \`backtick\`]`
+    )
   })
 
   it(`should configure TypeScript-specific rules`, () => {
@@ -82,7 +84,9 @@ describe(`ESLint Configuration`, () => {
     const configContent = readFileSync(configPath, `utf-8`)
 
     // Should import tanstackConfig
-    expect(configContent).toContain(`import { tanstackConfig } from "@tanstack/config/eslint"`)
+    expect(configContent).toContain(
+      `import { tanstackConfig } from "@tanstack/config/eslint"`
+    )
 
     // Should spread tanstackConfig at the beginning of the config array
     expect(configContent).toMatch(/\.\.\.tanstackConfig/)

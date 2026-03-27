@@ -238,10 +238,7 @@ describe(`Helper Utilities`, () => {
       await new Promise((resolve) => setTimeout(resolve, 2))
 
       // Update - pass the inserted object (with _createdAt) to preserve it
-      const updated = addDexieMetadata(
-        { ...inserted, name: `Updated` },
-        true
-      )
+      const updated = addDexieMetadata({ ...inserted, name: `Updated` }, true)
 
       expect(updated._createdAt).toBe(createdAt) // Preserved
       expect(updated._updatedAt).toBeGreaterThanOrEqual(createdAt) // Same or newer timestamp

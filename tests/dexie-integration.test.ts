@@ -119,7 +119,7 @@ describe(`Dexie Integration Patterns`, () => {
           await db.items.add({ id: `1`, name: `Should Rollback` })
           throw new Error(`Force rollback`)
         })
-      } catch (err) {
+      } catch {
         // Expected error
       }
 
@@ -138,7 +138,7 @@ describe(`Dexie Integration Patterns`, () => {
       await db.open()
 
       let callCount = 0
-      let lastResult: any[] = []
+      let lastResult: Array<any> = []
 
       const subscription = liveQuery(async () => {
         callCount++
@@ -173,7 +173,7 @@ describe(`Dexie Integration Patterns`, () => {
       db.version(1).stores({ items: `&id` })
       await db.open()
 
-      const results: Array<any[]> = []
+      const results: Array<Array<any>> = []
 
       const subscription = liveQuery(async () => {
         const items = await db.items.toArray()
@@ -269,7 +269,9 @@ describe(`Dexie Integration Patterns`, () => {
 
       let errorCaught = false
 
+      // Use async function to properly handle errors in liveQuery
       const subscription = liveQuery(async () => {
+        await Promise.resolve() // Add await to make it a proper async function
         throw new Error(`Test error`)
       }).subscribe({
         next: () => {},
@@ -291,12 +293,12 @@ describe(`Dexie Integration Patterns`, () => {
   describe(`Database Upgrade with Upgrader Functions`, () => {
     it(`should run upgrader function when upgrading version`, async () => {
       const DBNAME = `test-upgrade-with-function`
-      
+
       // Create initial version
       let db = new Dexie(DBNAME)
       db.version(1).stores({ users: `++id` })
       await db.open()
-      
+
       // Add initial data
       await db.users.bulkAdd([{ name: `User1` }, { name: `User2` }])
       db.close()
@@ -304,15 +306,17 @@ describe(`Dexie Integration Patterns`, () => {
       // Upgrade with upgrader function
       db = new Dexie(DBNAME)
       db.version(1).stores({ users: `++id` })
-      db.version(2).stores({ users: `++id,email` }).upgrade((trans) => {
-        let counter = 0
-        return trans
-          .table(`users`)
-          .toCollection()
-          .modify((obj) => {
-            obj.email = `user${++counter}@example.com`
-          })
-      })
+      db.version(2)
+        .stores({ users: `++id,email` })
+        .upgrade((trans) => {
+          let counter = 0
+          return trans
+            .table(`users`)
+            .toCollection()
+            .modify((obj) => {
+              obj.email = `user${++counter}@example.com`
+            })
+        })
       await db.open()
 
       // Verify upgrader ran
@@ -327,7 +331,7 @@ describe(`Dexie Integration Patterns`, () => {
 
     it(`should handle multiple upgrader functions in sequence`, async () => {
       const DBNAME = `test-multi-upgrade`
-      
+
       // Version 1
       let db = new Dexie(DBNAME)
       db.version(1).stores({ items: `++id` })
@@ -338,11 +342,16 @@ describe(`Dexie Integration Patterns`, () => {
       // Version 2 with upgrader
       db = new Dexie(DBNAME)
       db.version(1).stores({ items: `++id` })
-      db.version(2).stores({ items: `++id,category` }).upgrade((trans) => {
-        return trans.table(`items`).toCollection().modify((obj) => {
-          obj.category = `default`
+      db.version(2)
+        .stores({ items: `++id,category` })
+        .upgrade((trans) => {
+          return trans
+            .table(`items`)
+            .toCollection()
+            .modify((obj) => {
+              obj.category = `default`
+            })
         })
-      })
       await db.open()
       db.close()
 
@@ -350,11 +359,16 @@ describe(`Dexie Integration Patterns`, () => {
       db = new Dexie(DBNAME)
       db.version(1).stores({ items: `++id` })
       db.version(2).stores({ items: `++id,category` })
-      db.version(3).stores({ items: `++id,category,priority` }).upgrade((trans) => {
-        return trans.table(`items`).toCollection().modify((obj) => {
-          obj.priority = 1
+      db.version(3)
+        .stores({ items: `++id,category,priority` })
+        .upgrade((trans) => {
+          return trans
+            .table(`items`)
+            .toCollection()
+            .modify((obj) => {
+              obj.priority = 1
+            })
         })
-      })
       await db.open()
 
       const items = await db.items.toArray()
@@ -368,16 +382,16 @@ describe(`Dexie Integration Patterns`, () => {
 
     it(`should handle version upgrade in reverse order specification`, async () => {
       const DBNAME = `test-reverse-version`
-      
+
       // Specify versions in reverse order (should still work)
       const db = new Dexie(DBNAME)
       db.version(3).stores({ items: `++id,name` })
       db.version(2).stores({ items: `++id` })
       db.version(1).stores({})
-      
+
       await db.open()
       expect(db.verno).toBe(3)
-      
+
       await db.items.add({ name: `Test Item` })
       const count = await db.items.count()
       expect(count).toBe(1)
@@ -427,7 +441,7 @@ describe(`Dexie Integration Patterns`, () => {
         .where(`[category+price]`)
         .between([`electronics`, 0], [`electronics`, 150])
         .toArray()
-      
+
       expect(electronics.length).toBe(1)
       expect(electronics[0].name).toBe(`Radio`)
 
@@ -441,16 +455,26 @@ describe(`Dexie Integration Patterns`, () => {
       await db.open()
 
       await db.articles.bulkAdd([
-        { id: `1`, title: `TypeScript Guide`, tags: [`typescript`, `javascript`] },
+        {
+          id: `1`,
+          title: `TypeScript Guide`,
+          tags: [`typescript`, `javascript`],
+        },
         { id: `2`, title: `React Tips`, tags: [`react`, `javascript`] },
         { id: `3`, title: `Vue Basics`, tags: [`vue`] },
       ])
 
       // Query by multiEntry index
-      const jsArticles = await db.articles.where(`tags`).equals(`javascript`).toArray()
+      const jsArticles = await db.articles
+        .where(`tags`)
+        .equals(`javascript`)
+        .toArray()
       expect(jsArticles.length).toBe(2)
 
-      const tsArticles = await db.articles.where(`tags`).equals(`typescript`).toArray()
+      const tsArticles = await db.articles
+        .where(`tags`)
+        .equals(`typescript`)
+        .toArray()
       expect(tsArticles.length).toBe(1)
 
       await db.close()
@@ -461,7 +485,7 @@ describe(`Dexie Integration Patterns`, () => {
   describe(`Database Migration from Raw IndexedDB`, () => {
     it(`should open existing IndexedDB database and migrate to Dexie`, async () => {
       const DBNAME = `test-migration-raw`
-      
+
       // Clean up first
       await Dexie.delete(DBNAME)
 
