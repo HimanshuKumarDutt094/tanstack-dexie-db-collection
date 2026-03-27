@@ -1,0 +1,47 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.4",
+  "version": 1,
+  "components": [
+    {
+      "type": "library",
+      "name": "@standard-schema/spec",
+      "version": "1.1.0",
+      "bomRef": "pkg:npm/@standard-schema/spec@1.1.0",
+      "externalReferences": [],
+      "repository": {
+        "url": "git+https://github.com/standard-schema/standard-schema.git"
+      }
+    },
+    {
+      "type": "library",
+      "name": "@tanstack/db",
+      "version": "0.6.0(typescript@5.8.3)",
+      "bomRef": "pkg:npm/@tanstack/db@0.6.0(typescript@5.8.3)",
+      "externalReferences": [],
+      "repository": {
+        "url": "git+https://github.com/TanStack/db.git"
+      }
+    },
+    {
+      "type": "library",
+      "name": "debug",
+      "version": "4.4.3",
+      "bomRef": "pkg:npm/debug@4.4.3",
+      "externalReferences": [],
+      "repository": {
+        "url": "git://github.com/debug-js/debug.git"
+      }
+    },
+    {
+      "type": "library",
+      "name": "dexie",
+      "version": "4.2.0",
+      "bomRef": "pkg:npm/dexie@4.2.0",
+      "externalReferences": [],
+      "repository": {
+        "url": "git+https://github.com/dexie/Dexie.js.git"
+      }
+    }
+  ]
+}

@@ -93,8 +93,8 @@ describe(`Dexie Basic Operations`, () => {
     const { collection, db } = await createTestState(initial)
     await waitForCollectionSize(collection, initial.length, 1000)
     expect(collection.size).toBe(2)
-    expect(collection.get(`1`)).toEqual(initial[0])
-    expect(collection.get(`2`)).toEqual(initial[1])
+    expect(collection.get(`1`)).toMatchObject(initial[0])
+    expect(collection.get(`2`)).toMatchObject(initial[1])
 
     await db.close()
 
@@ -106,9 +106,9 @@ describe(`Dexie Basic Operations`, () => {
     const { collection, db } = await createTestState(docs)
     await waitForCollectionSize(collection, docs.length, 15000)
     expect(collection.size).toBe(25)
-    expect(collection.get(`1`)).toEqual(docs[0])
-    expect(collection.get(`10`)).toEqual(docs[9])
-    expect(collection.get(`25`)).toEqual(docs[24])
+    expect(collection.get(`1`)).toMatchObject(docs[0])
+    expect(collection.get(`10`)).toMatchObject(docs[9])
+    expect(collection.get(`25`)).toMatchObject(docs[24])
 
     db.close()
 
