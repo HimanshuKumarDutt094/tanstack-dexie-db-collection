@@ -36,14 +36,21 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
     // Both collections should see the same final value (last writer wins)
     const finalValueA = colA.get(`race-1`)
     const finalValueB = colB.get(`race-1`)
-    expect(finalValueA).toEqual(finalValueB)
-    expect(finalValueA?.name).toMatch(/Collection [AB]/)
+    // Compare only data fields, ignoring internal metadata ($collectionId, $key, etc.)
+    const dataA = finalValueA
+      ? { id: finalValueA.id, name: finalValueA.name }
+      : null
+    const dataB = finalValueB
+      ? { id: finalValueB.id, name: finalValueB.name }
+      : null
+    expect(dataA).toEqual(dataB)
+    expect(dataA?.name).toMatch(/Collection [AB]/)
 
     // Verify the data is actually persisted in the database
     const dbRow = await dbA.table(`test`).get(`race-1`)
     // Strip metadata fields for comparison since database now stores internal metadata
     const cleanDbRow = dbRow ? { id: dbRow.id, name: dbRow.name } : dbRow
-    expect(cleanDbRow).toEqual(finalValueA)
+    expect(cleanDbRow).toEqual(dataA)
 
     dbA.close()
     dbB.close()
@@ -134,15 +141,21 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
     for (;;) {
       finalA = colA.get(`flip-flop`)
       finalB = colB.get(`flip-flop`)
+      // Compare only data fields, ignoring internal metadata
+      const cleanA = finalA ? { id: finalA.id, name: finalA.name } : null
+      const cleanB = finalB ? { id: finalB.id, name: finalB.name } : null
       const same =
-        (finalA === undefined && finalB === undefined) ||
-        (finalA && finalB && JSON.stringify(finalA) === JSON.stringify(finalB))
+        (cleanA === null && cleanB === null) ||
+        (cleanA && cleanB && JSON.stringify(cleanA) === JSON.stringify(cleanB))
       if (same) break
       if (Date.now() - start > 2000) break
       await new Promise((r) => setTimeout(r, 50))
     }
 
-    expect(JSON.stringify(finalA)).toEqual(JSON.stringify(finalB))
+    // Compare data fields only
+    const cleanFinalA = finalA ? { id: finalA.id, name: finalA.name } : null
+    const cleanFinalB = finalB ? { id: finalB.id, name: finalB.name } : null
+    expect(JSON.stringify(cleanFinalA)).toEqual(JSON.stringify(cleanFinalB))
 
     if (finalA) {
       expect(finalA.name).toMatch(/[AB]-insert-2/)
@@ -203,8 +216,11 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
     for (let i = 5; i <= 10; i++) {
       const valueA = colA.get(String(i))
       const valueB = colB.get(String(i))
-      expect(valueA).toEqual(valueB)
-      expect(valueA?.name).toMatch(/Item \d+ from [AB]/)
+      // Compare only data fields, ignoring internal metadata
+      const dataA = valueA ? { id: valueA.id, name: valueA.name } : null
+      const dataB = valueB ? { id: valueB.id, name: valueB.name } : null
+      expect(dataA).toEqual(dataB)
+      expect(dataA?.name).toMatch(/Item \d+ from [AB]/)
     }
 
     // Non-overlapping keys should have expected values
@@ -259,10 +275,17 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
     // Both collections should see the same final value
     const finalValueA = colA.get(`update-me`)
     const finalValueB = colB.get(`update-me`)
-    expect(finalValueA).toEqual(finalValueB)
+    // Compare only data fields, ignoring internal metadata
+    const dataA = finalValueA
+      ? { id: finalValueA.id, name: finalValueA.name }
+      : null
+    const dataB = finalValueB
+      ? { id: finalValueB.id, name: finalValueB.name }
+      : null
+    expect(dataA).toEqual(dataB)
 
     // Should have one of the updates (last writer wins)
-    expect(finalValueA?.name).toMatch(/Updated by [AB]/)
+    expect(dataA?.name).toMatch(/Updated by [AB]/)
 
     dbA.close()
     dbB.close()
@@ -361,7 +384,12 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
       const itemId = String(i)
       expect(colA.has(itemId)).toBe(true)
       expect(colB.has(itemId)).toBe(true)
-      expect(colA.get(itemId)).toEqual(colB.get(itemId))
+      // Compare only data fields, ignoring internal metadata
+      const dataA = colA.get(itemId)
+      const dataB = colB.get(itemId)
+      const cleanDataA = dataA ? { id: dataA.id, name: dataA.name } : null
+      const cleanDataB = dataB ? { id: dataB.id, name: dataB.name } : null
+      expect(cleanDataA).toEqual(cleanDataB)
     }
 
     dbA.close()

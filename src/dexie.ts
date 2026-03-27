@@ -38,9 +38,9 @@ export interface DexieCollectionConfig<
   TItem extends object = Record<string, unknown>,
   TSchema extends StandardSchemaV1 = never,
 > extends Omit<
-    CollectionConfig<TItem, string | number, TSchema>,
-    `onInsert` | `onUpdate` | `onDelete` | `getKey` | `sync`
-  > {
+  CollectionConfig<TItem, string | number, TSchema, TItem>,
+  `onInsert` | `onUpdate` | `onDelete` | `getKey` | `sync`
+> {
   dbName?: string
   tableName?: string
   storeName?: string
@@ -101,14 +101,19 @@ export interface DexieUtils extends UtilsRecord {
  */
 export function dexieCollectionOptions<T extends StandardSchemaV1>(
   config: DexieCollectionConfig<InferSchemaOutput<T>, T>
-): CollectionConfig<InferSchemaOutput<T>, string | number, T> & {
+): CollectionConfig<
+  InferSchemaOutput<T>,
+  string | number,
+  T,
+  InferSchemaOutput<T>
+> & {
   schema: T
   utils: DexieUtils
 }
 
 export function dexieCollectionOptions<T extends object>(
   config: DexieCollectionConfig<T> & { schema?: never }
-): CollectionConfig<T, string | number> & {
+): CollectionConfig<T, string | number, StandardSchemaV1, T> & {
   schema?: never
   utils: DexieUtils
 }
@@ -118,7 +123,9 @@ export function dexieCollectionOptions<
   TSchema extends StandardSchemaV1 = never,
 >(
   config: DexieCollectionConfig<TItem, TSchema>
-): CollectionConfig<TItem, string | number, TSchema> & { utils: DexieUtils } {
+): CollectionConfig<TItem, string | number, TSchema, TItem> & {
+  utils: DexieUtils
+} {
   // Track IDs seen by the reactive layer (timestamp as value) - per collection instance
   const seenIds = new Map<string | number, number>()
 
@@ -799,6 +806,8 @@ export function dexieCollectionOptions<
     })
     void txUP.catch(() => {})
     await txUP
+    await db.table(tableName).count()
+
     const ids = mutations.map((m) => m.key)
     const now = Date.now()
     for (const id of ids) seenIds.set(id, now)
@@ -819,21 +828,20 @@ export function dexieCollectionOptions<
   }
 
   const onDelete = async (deleteParams: DeleteMutationFnParams<TItem>) => {
-    // Ensure sync is started so deletions are observed by liveQuery
     deleteParams.collection.startSyncImmediate()
-
     const mutations = deleteParams.transaction.mutations
     const ids = mutations.map((m) => m.key)
 
-    // bulk delete
-
-    const txD = db.transaction(`rw`, table, async () => {
+    const txDP = db.transaction(`rw`, table, async () => {
       await table.bulkDelete(ids)
     })
-    void txD.catch(() => {})
-    await txD
+    void txDP.catch(() => {})
+    await txDP
+    await db.table(tableName).count()
 
-    ids.forEach((id) => seenIds.delete(id))
+    const now = Date.now()
+    for (const id of ids) seenIds.set(id, now)
+    triggerRefresh()
 
     if (typeof config.onDelete === `function`) {
       const call = () => config.onDelete!(deleteParams)
@@ -849,340 +857,78 @@ export function dexieCollectionOptions<
     return ids
   }
 
-  /**
-   * Insert an item locally to both IndexedDB and TanStack DB memory.
-   * Does NOT trigger the user's onInsert handler.
-   *
-   * Uses put internally, so it will update existing items with the same key.
-   *
-   * @param item - The item to insert
-   * @returns Promise that resolves when the item is persisted and visible in memory
-   */
-  const insertLocally = async (item: TItem): Promise<void> => {
-    // Validate with schema if provided
-    const validated = validateSchema(item)
-
-    const serialized = serialize(validated, false)
-    const key = config.getKey(validated)
-
-    try {
-      await db.transaction(`rw`, table, async () => {
-        await table.put({ ...serialized, id: key })
-      })
-    } catch (error) {
-      debug(`insertLocally:error`, { key, error: String(error) })
-      throw new Error(
-        `Failed to insert item locally: ${error instanceof Error ? error.message : String(error)}`
-      )
-    }
-
-    // Mark as seen and ack
-    seenIds.set(key, Date.now())
-    ackedIds.add(key)
-    const pending = pendingAcks.get(key)
-    if (pending) {
-      pending.resolve()
-      pendingAcks.delete(key)
-    }
-
-    triggerRefresh()
-
-    // Give liveQuery a moment to process the change
-    await new Promise((r) => setTimeout(r, 10))
-  }
-
-  /**
-   * Insert multiple items locally to both IndexedDB and TanStack DB memory.
-   * Does NOT trigger the user's onInsert handler.
-   *
-   * Uses bulkPut internally, so it will update existing items with the same keys.
-   * Handles partial failures gracefully - successful items are still written.
-   *
-   * @param items - Array of items to insert
-   * @returns Promise that resolves when items are persisted
-   * @throws Error with details if any items fail to insert
-   */
-  const bulkInsertLocally = async (items: Array<TItem>): Promise<void> => {
-    if (items.length === 0) return
-
-    const serializedItems = items.map((item) => {
-      const serialized = serialize(item, false)
-      const key = config.getKey(item)
-      return { ...serialized, id: key }
-    })
-
-    try {
-      await db.transaction(`rw`, table, async () => {
-        await table.bulkPut(serializedItems)
-      })
-    } catch (error) {
-      if (error instanceof Error && error.name === `BulkError`) {
-        const bulkError = error as any
-        debug(`bulkInsertLocally:partial-failure`, {
-          total: items.length,
-          failures: bulkError.failures?.length || 0,
-          errors: bulkError.failures?.map((e: Error) => e.message) || [],
-        })
-
-        // Mark successful items as seen
-        const failedPositions = new Set(
-          Object.keys(bulkError.failuresByPos || {}).map(Number)
-        )
-        const now = Date.now()
-        items.forEach((item, index) => {
-          if (!failedPositions.has(index)) {
-            const key = config.getKey(item)
-            seenIds.set(key, now)
-            ackedIds.add(key)
-            const pending = pendingAcks.get(key)
-            if (pending) {
-              pending.resolve()
-              pendingAcks.delete(key)
-            }
-          }
-        })
-
-        triggerRefresh()
-
-        throw new Error(
-          `Failed to insert ${bulkError.failures?.length || 0} of ${items.length} items locally`
-        )
-      }
-
-      debug(`bulkInsertLocally:error`, { error: String(error) })
-      throw new Error(
-        `Failed to bulk insert items locally: ${error instanceof Error ? error.message : String(error)}`
-      )
-    }
-
-    // Mark all as seen and ack
-    const now = Date.now()
-    for (const item of items) {
-      const key = config.getKey(item)
-      seenIds.set(key, now)
-      ackedIds.add(key)
-      const pending = pendingAcks.get(key)
-      if (pending) {
-        pending.resolve()
-        pendingAcks.delete(key)
-      }
-    }
-
-    triggerRefresh()
-  }
-
-  /**
-   * Update an item locally in both IndexedDB and TanStack DB memory.
-   * Does NOT trigger the user's onUpdate handler.
-   *
-   * @param id - The ID of the item to update
-   * @param item - The updated item
-   * @returns Promise that resolves when the item is persisted
-   */
-  const updateLocally = async (
-    id: string | number,
-    item: TItem
-  ): Promise<void> => {
-    const serialized = serialize(item, true)
-
-    try {
-      let updated = 0
-      await db.transaction(`rw`, table, async () => {
-        if (config.rowUpdateMode === `full`) {
-          await table.put({ ...serialized, id })
-          updated = 1
-        } else {
-          updated = await table.update(id, serialized)
-        }
-      })
-
-      // In partial mode, throw if item doesn't exist
-      if (config.rowUpdateMode !== `full` && updated === 0) {
-        throw new Error(`Item with id "${id}" not found`)
-      }
-    } catch (error) {
-      debug(`updateLocally:error`, { id, error: String(error) })
-      throw new Error(
-        `Failed to update item locally: ${error instanceof Error ? error.message : String(error)}`
-      )
-    }
-
-    // Mark as seen and ack
-    seenIds.set(id, Date.now())
-    ackedIds.add(id)
-    const pending = pendingAcks.get(id)
-    if (pending) {
-      pending.resolve()
-      pendingAcks.delete(id)
-    }
-
-    triggerRefresh()
-
-    // Give liveQuery a moment to process the change
-    await new Promise((r) => setTimeout(r, 10))
-  }
-
-  /**
-   * Update multiple items locally in both IndexedDB and TanStack DB memory.
-   * Does NOT trigger the user's onUpdate handler.
-   *
-   * @param items - Array of items to update (must include keys)
-   * @returns Promise that resolves when items are persisted
-   * @throws Error with details if any items fail to update
-   */
-  const bulkUpdateLocally = async (items: Array<TItem>): Promise<void> => {
-    if (items.length === 0) return
-
-    try {
-      await db.transaction(`rw`, table, async () => {
-        if (config.rowUpdateMode === `full`) {
-          const serializedItems = items.map((item) => {
-            const serialized = serialize(item, true)
-            const key = config.getKey(item)
-            return { ...serialized, id: key }
-          })
-          await table.bulkPut(serializedItems)
-        } else {
-          // Partial mode - update each individually
-          for (const item of items) {
-            const key = config.getKey(item)
-            const serialized = serialize(item, true)
-            await table.update(key, serialized)
-          }
-        }
-      })
-    } catch (error) {
-      if (error instanceof Error && error.name === `BulkError`) {
-        const bulkError = error as any
-        debug(`bulkUpdateLocally:partial-failure`, {
-          total: items.length,
-          failures: bulkError.failures?.length || 0,
-        })
-        throw new Error(
-          `Failed to update ${bulkError.failures?.length || 0} of ${items.length} items locally`
-        )
-      }
-
-      debug(`bulkUpdateLocally:error`, { error: String(error) })
-      throw new Error(
-        `Failed to bulk update items locally: ${error instanceof Error ? error.message : String(error)}`
-      )
-    }
-
-    // Mark all as seen and ack
-    const now = Date.now()
-    for (const item of items) {
-      const key = config.getKey(item)
-      seenIds.set(key, now)
-      ackedIds.add(key)
-      const pending = pendingAcks.get(key)
-      if (pending) {
-        pending.resolve()
-        pendingAcks.delete(key)
-      }
-    }
-
-    triggerRefresh()
-  }
-
-  /**
-   * Delete an item locally from both IndexedDB and TanStack DB memory.
-   * Does NOT trigger the user's onDelete handler.
-   *
-   * @param id - The ID of the item to delete
-   * @returns Promise that resolves when the item is deleted
-   */
-  const deleteLocally = async (id: string | number): Promise<void> => {
-    try {
-      await db.transaction(`rw`, table, async () => {
-        await table.delete(id)
-      })
-    } catch (error) {
-      debug(`deleteLocally:error`, { id, error: String(error) })
-      throw new Error(
-        `Failed to delete item locally: ${error instanceof Error ? error.message : String(error)}`
-      )
-    }
-
-    // Remove from tracking
-    seenIds.delete(id)
-    ackedIds.delete(id)
-    pendingAcks.delete(id)
-
-    triggerRefresh()
-  }
-
-  /**
-   * Delete multiple items locally from both IndexedDB and TanStack DB memory.
-   * Does NOT trigger the user's onDelete handler.
-   *
-   * @param ids - Array of IDs to delete
-   * @returns Promise that resolves when items are deleted
-   * @throws Error with details if any items fail to delete
-   */
-  const bulkDeleteLocally = async (
-    ids: Array<string | number>
-  ): Promise<void> => {
-    if (ids.length === 0) return
-
-    try {
-      await db.transaction(`rw`, table, async () => {
-        await table.bulkDelete(ids)
-      })
-    } catch (error) {
-      if (error instanceof Error && error.name === `BulkError`) {
-        const bulkError = error as any
-        debug(`bulkDeleteLocally:partial-failure`, {
-          total: ids.length,
-          failures: bulkError.failures?.length || 0,
-        })
-        throw new Error(
-          `Failed to delete ${bulkError.failures?.length || 0} of ${ids.length} items locally`
-        )
-      }
-
-      debug(`bulkDeleteLocally:error`, { error: String(error) })
-      throw new Error(
-        `Failed to bulk delete items locally: ${error instanceof Error ? error.message : String(error)}`
-      )
-    }
-
-    // Remove all from tracking
-    for (const id of ids) {
-      seenIds.delete(id)
-      ackedIds.delete(id)
-      pendingAcks.delete(id)
-    }
-
-    triggerRefresh()
-  }
-
+  // Build utils object
   const utils: DexieUtils = {
     getTable: () => table as Table<Record<string, unknown>, string | number>,
+
     awaitIds,
+
     refresh: triggerRefresh,
+
     refetch: async () => {
       triggerRefresh()
-      await new Promise((r) => setTimeout(r, 20))
+      await new Promise((resolve) => setTimeout(resolve, 100))
     },
-    insertLocally,
-    updateLocally,
-    deleteLocally,
-    bulkInsertLocally,
-    bulkUpdateLocally,
-    bulkDeleteLocally,
+
+    insertLocally: async (item: any) => {
+      const validated = validateSchema(item)
+      const serialized = serialize(validated, false)
+      const key = config.getKey(validated)
+      await table.put({ ...serialized, id: key })
+      triggerRefresh()
+    },
+
+    updateLocally: async (id: string | number, item: any) => {
+      const validated = validateSchema(item)
+      const serialized = serialize(validated, true)
+      const count = await table.update(id, serialized)
+      if (count === 0) {
+        throw new Error(`Item with id ${String(id)} not found`)
+      }
+      triggerRefresh()
+    },
+
+    deleteLocally: async (id: string | number) => {
+      await table.delete(id)
+      triggerRefresh()
+    },
+
+    bulkInsertLocally: async (items: Array<any>) => {
+      const validatedItems = items.map((item) => validateSchema(item))
+      const serializedItems = validatedItems.map((item) => ({
+        ...serialize(item, false),
+        id: config.getKey(item),
+      }))
+      await table.bulkPut(serializedItems)
+      triggerRefresh()
+    },
+
+    bulkUpdateLocally: async (items: Array<any>) => {
+      const validatedItems = items.map((item) => validateSchema(item))
+      for (const item of validatedItems) {
+        const serialized = serialize(item, true)
+        const key = config.getKey(item)
+        await table.update(key, serialized)
+      }
+      triggerRefresh()
+    },
+
+    bulkDeleteLocally: async (ids: Array<string | number>) => {
+      await table.bulkDelete(ids)
+      triggerRefresh()
+    },
+
     getNextId,
   }
 
   return {
-    id: config.id,
-    schema: config.schema,
-    getKey: config.getKey,
-    rowUpdateMode: config.rowUpdateMode ?? `partial`,
+    ...config,
     sync: { sync },
     onInsert,
     onUpdate,
     onDelete,
     utils,
-  } as CollectionConfig<TItem, string | number> & { utils: DexieUtils }
+  } as unknown as CollectionConfig<TItem, string | number, TSchema, TItem> & {
+    utils: DexieUtils
+  }
 }
