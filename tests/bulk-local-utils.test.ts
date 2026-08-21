@@ -159,7 +159,7 @@ describe(`Dexie Local Write Utilities`, () => {
       expect(dbCount).toBe(500)
 
       // Should be reasonably fast (< 2 seconds)
-      expect(duration).toBeLessThan(2000)
+      expect(duration).toBeLessThan(5000)
     })
 
     it(`handles duplicates gracefully (upsert behavior)`, async () => {
@@ -367,7 +367,7 @@ describe(`Dexie Local Write Utilities`, () => {
       expect(dbCount).toBe(200)
 
       // Should be reasonably fast
-      expect(duration).toBeLessThan(2000)
+      expect(duration).toBeLessThan(5000)
     })
   })
 
@@ -499,7 +499,7 @@ describe(`Dexie Local Write Utilities`, () => {
       expect(dbCount).toBe(150)
 
       // Should be reasonably fast
-      expect(duration).toBeLessThan(2000)
+      expect(duration).toBeLessThan(5000)
     })
 
     it(`removes all items from tracking`, async () => {

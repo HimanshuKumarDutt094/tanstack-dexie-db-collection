@@ -1,42 +1,44 @@
 {
   "name": "tanstack-dexie-db-collection",
-  "description": "Dexie collection for TanStack DB",
-  "version": "0.1.4",
+  "description": "Dexie collection for TanStack DB v0.6.0+",
+  "version": "0.2.0",
   "type": "module",
   "dependencies": {
-    "@standard-schema/spec": "^1.0.0",
-    "@tanstack/db": "latest",
-    "debug": "^4.4.1",
-    "dexie": "4.2.0"
+    "@standard-schema/spec": "^1.1.0",
+    "@tanstack/db": "^0.8.2",
+    "debug": "^4.4.3",
+    "dexie": "4.4.2"
   },
   "devDependencies": {
-    "@stylistic/eslint-plugin": "^5.4.0",
-    "@tanstack/config": "^0.20.1",
-    "@types/debug": "^4.1.12",
-    "@types/node": "^24.5.2",
-    "@vitest/coverage-istanbul": "^3.0.9",
-    "@vitest/ui": "^3.2.4",
-    "bumpp": "^10.2.3",
-    "eslint": "link:@tanstack/config/eslint",
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "@tanstack/eslint-config": "^0.4.0",
+    "@tanstack/vite-config": "^0.6.0",
+    "@types/debug": "^4.1.13",
+    "@types/node": "^25.6.0",
+    "@typescript/typescript6": "^6.0.2",
+    "@vitest/coverage-istanbul": "^4.1.4",
+    "@vitest/ui": "^4.1.4",
+    "bumpp": "^11.0.1",
+    "eslint": "^10.3.0",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-prettier": "^5.5.4",
-    "fake-indexeddb": "^6.2.2",
-    "jsdom": "^27.0.0",
-    "prettier": "^3.6.2",
-    "vite": "link:@tanstack/config/vite",
-    "vitest": "^3.2.4",
-    "zod": "^4"
+    "eslint-plugin-prettier": "^5.5.5",
+    "fake-indexeddb": "^6.2.5",
+    "fast-check": "^4.8.0",
+    "husky": "^9.1.7",
+    "jsdom": "^29.0.2",
+    "prettier": "^3.8.3",
+    "rollup-plugin-preserve-directives": "^0.4.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.0.9",
+    "vite-plugin-dts": "^5.0.3",
+    "vite-plugin-externalize-deps": "^0.10.0",
+    "vitest": "^4.1.5",
+    "zod": "^4.3.6"
   },
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/esm/index.d.ts",
-        "default": "./dist/esm/index.js"
-      },
-      "require": {
-        "types": "./dist/cjs/index.d.cts",
-        "default": "./dist/cjs/index.cjs"
-      }
+      "types": "./dist/esm/index.d.ts",
+      "default": "./dist/esm/index.js"
     },
     "./package.json": "./package.json"
   },
@@ -44,13 +46,8 @@
     "dist",
     "src"
   ],
-  "main": "dist/cjs/index.cjs",
-  "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.6.3",
-  "peerDependencies": {
-    "dexie": ">=4.2.0",
-    "typescript": ">=4.7"
-  },
+  "main": "./dist/esm/index.js",
+  "module": "./dist/esm/index.js",
   "author": "Himanshu Kumar Dutt <adasimobenio@gmail.com>",
   "license": "MIT",
   "repository": {
@@ -74,10 +71,11 @@
     "lint": "eslint . --fix",
     "test": "npx vitest --run",
     "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
+    "prepare": "husky",
     "release": "bumpp && npm publish"
   },
   "sideEffects": false,
-  "types": "dist/esm/index.d.ts",
+  "types": "./dist/esm/index.d.ts",
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"

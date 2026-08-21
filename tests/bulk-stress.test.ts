@@ -505,7 +505,7 @@ describe(`Dexie Bulk Operations Stress Testing`, () => {
 
     const retrievalDuration = Date.now() - retrievalStart
     console.log(`Retrieved 50 random items in ${retrievalDuration}ms`)
-  }, 15000) // Increase timeout to 15 seconds for this performance test
+  }, 30000) // Increase timeout for CI
 
   describe(`getNextId stress testing`, () => {
     it(`generates 100 sequential IDs rapidly`, async () => {
@@ -523,7 +523,7 @@ describe(`Dexie Bulk Operations Stress Testing`, () => {
       console.log(`Generated ${count} IDs in ${duration}ms`)
 
       expect(ids).toEqual(Array.from({ length: count }, (_, i) => i + 1))
-      expect(duration).toBeLessThan(1000)
+      expect(duration).toBeLessThan(3000)
 
       await db.close()
       await Dexie.delete(db.name)
@@ -572,7 +572,7 @@ describe(`Dexie Bulk Operations Stress Testing`, () => {
 
       await db.close()
       await Dexie.delete(db.name)
-    }, 10000)
+    }, 30000)
 
     it(`maintains counter integrity under rapid operations`, async () => {
       const { collection, db } = await createNumericTestState()

@@ -153,3 +153,5 @@ tasks/
 .output
 .tanstack
 .claude
+
+src_modules

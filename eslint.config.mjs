@@ -1,7 +1,7 @@
 import prettierPlugin from "eslint-plugin-prettier"
 import prettierConfig from "eslint-config-prettier"
 import stylisticPlugin from "@stylistic/eslint-plugin"
-import { tanstackConfig } from "@tanstack/config/eslint"
+import { tanstackConfig } from "@tanstack/eslint-config"
 
 export default [
   ...tanstackConfig,

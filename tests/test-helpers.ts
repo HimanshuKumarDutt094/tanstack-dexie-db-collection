@@ -225,6 +225,19 @@ export async function createTestState(initialDocs: Array<TestItem> = []) {
 }
 
 export async function cleanupTestResources() {
+  // Suppress DatabaseClosedError unhandled rejections during cleanup.
+  // Dexie's liveQuery emits rejections when DBs are closed mid-subscription,
+  // which are expected during test teardown and not real errors.
+  const suppression = (ev: PromiseRejectionEvent) => {
+    if (
+      ev.reason?.name === `DatabaseClosedError` ||
+      ev.reason?.inner?.name === `DatabaseClosedError`
+    ) {
+      ev.preventDefault()
+    }
+  }
+  process.on(`unhandledRejection`, suppression)
+
   // Clean up collections first to ensure their drivers unsubscribe and close DBs
   for (const col of createdCollections.splice(0)) {
     try {
@@ -239,6 +252,8 @@ export async function cleanupTestResources() {
 
     await Dexie.delete(db.name)
   }
+
+  process.off(`unhandledRejection`, suppression)
 }
 
 // Numeric ID test utilities for sequential ID testing

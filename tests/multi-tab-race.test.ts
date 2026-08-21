@@ -1,6 +1,7 @@
 import "./fake-db"
 import { afterEach, describe, expect, it } from "vitest"
 import Dexie from "dexie"
+import fc from "fast-check"
 import {
   cleanupTestResources,
   createMultiTabState,
@@ -12,213 +13,284 @@ import {
 } from "./test-helpers"
 import type { TestItem } from "./test-helpers"
 
+// Insert-or-update on a contended key. Under realistic interleaving the OTHER
+// tab's write may already have synced this key into our local state (Dexie
+// liveQuery fires between scheduler steps), so a plain `insert()` would throw
+// "already exists". Upsert preserves the concurrent-write intent (last writer
+// wins) regardless of sync timing — which is exactly what the scheduler
+// surfaced that `Promise.all` hid. The scheduler found this; the helper is the
+// fix to keep the test asserting the real invariant (convergence), not an
+// incidental insert-vs-update timing accident.
+async function upsert(
+  col: any,
+  item: { id: string; name: string }
+): Promise<void> {
+  try {
+    await col.insert(item).isPersisted.promise
+  } catch {
+    col.update(item.id, (d: any) => {
+      d.name = item.name
+    })
+    await col.stateWhenReady()
+  }
+}
+
+// Per-run teardown for property tests. fast-check runs the body `numRuns`
+// times; without this, every run leaks two live liveQuery subscriptions, which
+// accumulate and slow later iterations into the test timeout. Unsubscribe the
+// collections BEFORE deleting the shared DB to avoid DatabaseClosedError noise.
+async function teardownMultiTab(
+  colA: any,
+  colB: any,
+  dbA: Dexie,
+  dbB: Dexie
+): Promise<void> {
+  try {
+    await colA.cleanup()
+  } catch {
+    /* ignore */
+  }
+  try {
+    await colB.cleanup()
+  } catch {
+    /* ignore */
+  }
+  dbA.close()
+  dbB.close()
+  try {
+    await Dexie.delete(dbA.name)
+  } catch {
+    /* ignore */
+  }
+}
+
 describe(`Dexie Multi-tab Race Conditions`, () => {
   afterEach(cleanupTestResources)
 
-  it(`handles concurrent inserts with same keys (last writer wins)`, async () => {
-    const { colA, colB, dbA, dbB } = await createMultiTabState()
+  // PORTED to fast-check `fc.scheduler()`. Instead of a single fixed ordering
+  // (`Promise.all`), the scheduler systematically explores both interleavings
+  // of the two tabs' inserts on the same key and asserts convergence under
+  // each. On failure it shrinks to the minimal `schedulerFor()` ordering for a
+  // deterministic repro. Per-run state uses a fresh DB (createMultiTabState
+  // bumps the db id); afterEach(cleanupTestResources) tears everything down.
+  it(`concurrent inserts on the same key converge under every interleaving`, async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.scheduler(), async (s) => {
+        const { colA, colB, dbA, dbB } = await createMultiTabState()
+        try {
+          // Each tab is a one-op sequence; the scheduler picks which lands last.
+          s.scheduleSequence([
+            () => upsert(colA, { id: `race-1`, name: `Collection A` }),
+          ])
+          s.scheduleSequence([
+            () => upsert(colB, { id: `race-1`, name: `Collection B` }),
+          ])
+          await s.waitAll()
 
-    // Both collections try to insert the same key concurrently
-    const txA = colA.insert({ id: `race-1`, name: `Collection A` })
-    const txB = colB.insert({ id: `race-1`, name: `Collection B` })
+          const utilsA = colA.utils as unknown as {
+            refetch?: () => Promise<void>
+          }
+          const utilsB = colB.utils as unknown as {
+            refetch?: () => Promise<void>
+          }
+          if (utilsA.refetch) await utilsA.refetch()
+          if (utilsB.refetch) await utilsB.refetch()
 
-    await Promise.all([txA.isPersisted.promise, txB.isPersisted.promise])
+          await waitForKey(colA, `race-1`, 1000)
+          await waitForKey(colB, `race-1`, 1000)
 
-    // Force refetch to ensure both see final state
-    const utilsA = colA.utils as unknown as { refetch?: () => Promise<void> }
-    const utilsB = colB.utils as unknown as { refetch?: () => Promise<void> }
-    if (utilsA.refetch) await utilsA.refetch()
-    if (utilsB.refetch) await utilsB.refetch()
+          // Both tabs must agree on the final value (last writer wins).
+          const finalValueA = colA.get(`race-1`)
+          const finalValueB = colB.get(`race-1`)
+          const dataA = finalValueA
+            ? { id: finalValueA.id, name: finalValueA.name }
+            : null
+          const dataB = finalValueB
+            ? { id: finalValueB.id, name: finalValueB.name }
+            : null
+          expect(dataA).toEqual(dataB)
+          expect(dataA?.name).toMatch(/Collection [AB]/)
 
-    await waitForKey(colA, `race-1`, 1000)
-    await waitForKey(colB, `race-1`, 1000)
-
-    // Both collections should see the same final value (last writer wins)
-    const finalValueA = colA.get(`race-1`)
-    const finalValueB = colB.get(`race-1`)
-    expect(finalValueA).toEqual(finalValueB)
-    expect(finalValueA?.name).toMatch(/Collection [AB]/)
-
-    // Verify the data is actually persisted in the database
-    const dbRow = await dbA.table(`test`).get(`race-1`)
-    // Strip metadata fields for comparison since database now stores internal metadata
-    const cleanDbRow = dbRow ? { id: dbRow.id, name: dbRow.name } : dbRow
-    expect(cleanDbRow).toEqual(finalValueA)
-
-    dbA.close()
-    dbB.close()
-
-    await Dexie.delete(dbA.name)
-  })
-
-  it(`handles concurrent delete operations on same key`, async () => {
-    const initialData = [{ id: `delete-me`, name: `To be deleted` }]
-    const { colA, colB, dbA, dbB } = await createMultiTabState(
-      initialData,
-      initialData
+          // And the persisted DB row matches what both tabs observe.
+          const dbRow = await dbA.table(`test`).get(`race-1`)
+          const cleanDbRow = dbRow ? { id: dbRow.id, name: dbRow.name } : dbRow
+          expect(cleanDbRow).toEqual(dataA)
+        } finally {
+          await teardownMultiTab(colA, colB, dbA, dbB)
+        }
+      }),
+      { numRuns: 8 }
     )
+  }, 30000)
 
-    await waitForKey(colA, `delete-me`, 1000)
-    await waitForKey(colB, `delete-me`, 1000)
+  // PORTED to fast-check `fc.scheduler()`: both tabs delete the same seeded
+  // key; the scheduler explores both orderings and asserts both converge on
+  // the key being absent (and gone from the shared DB) regardless of which
+  // delete lands first.
+  it(`concurrent deletes on the same key converge under every interleaving`, async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.scheduler(), async (s) => {
+        const initialData = [{ id: `delete-me`, name: `To be deleted` }]
+        const { colA, colB, dbA, dbB } = await createMultiTabState(
+          initialData,
+          initialData
+        )
+        try {
+          await waitForKey(colA, `delete-me`, 1000)
+          await waitForKey(colB, `delete-me`, 1000)
 
-    // Both collections try to delete the same key
-    colA.delete(`delete-me`)
-    colB.delete(`delete-me`)
+          s.scheduleSequence([
+            async () => {
+              colA.delete(`delete-me`)
+              await colA.stateWhenReady()
+            },
+          ])
+          s.scheduleSequence([
+            async () => {
+              colB.delete(`delete-me`)
+              await colB.stateWhenReady()
+            },
+          ])
+          await s.waitAll()
 
-    await colA.stateWhenReady()
-    await colB.stateWhenReady()
+          const utilsA = colA.utils as unknown as {
+            refetch?: () => Promise<void>
+          }
+          const utilsB = colB.utils as unknown as {
+            refetch?: () => Promise<void>
+          }
+          if (utilsA.refetch) await utilsA.refetch()
+          if (utilsB.refetch) await utilsB.refetch()
 
-    // Force refetch to ensure both see final state
-    const utilsA = colA.utils as unknown as { refetch?: () => Promise<void> }
-    const utilsB = colB.utils as unknown as { refetch?: () => Promise<void> }
-    if (utilsA.refetch) await utilsA.refetch()
-    if (utilsB.refetch) await utilsB.refetch()
+          await waitForNoKey(colA, `delete-me`, 1000)
+          await waitForNoKey(colB, `delete-me`, 1000)
 
-    await waitForNoKey(colA, `delete-me`, 1000)
-    await waitForNoKey(colB, `delete-me`, 1000)
+          expect(colA.has(`delete-me`)).toBe(false)
+          expect(colB.has(`delete-me`)).toBe(false)
 
-    // Both should agree the item is gone
-    expect(colA.has(`delete-me`)).toBe(false)
-    expect(colB.has(`delete-me`)).toBe(false)
-
-    // Verify deletion is persisted
-    const dbRow = await dbA.table(`test`).get(`delete-me`)
-    expect(dbRow).toBeUndefined()
-
-    dbA.close()
-    dbB.close()
-
-    await Dexie.delete(dbA.name)
-  })
-
-  it(`handles rapid alternating inserts and deletes`, async () => {
-    const { colA, colB, dbA, dbB } = await createMultiTabState()
-
-    // Collection A: Insert, Delete, Insert
-    // Collection B: Insert different values for same key
-    const operations = [
-      () => colA.insert({ id: `flip-flop`, name: `A-insert-1` }),
-      () => colB.insert({ id: `flip-flop`, name: `B-insert-1` }),
-      () => colA.delete(`flip-flop`),
-      () => colB.insert({ id: `flip-flop`, name: `B-insert-2` }),
-      () => colA.insert({ id: `flip-flop`, name: `A-insert-2` }),
-    ]
-
-    // Execute operations with small delays to create race conditions
-    const promises = operations.map(
-      (op, i) =>
-        new Promise<void>((resolve) => {
-          setTimeout(async () => {
-            try {
-              const tx = op()
-              if (`isPersisted` in tx) {
-                await tx.isPersisted.promise
-              } else {
-                // If op returned undefined (e.g. delete), just wait briefly
-                await new Promise((r) => setTimeout(r, 20))
-              }
-            } catch {}
-            resolve()
-          }, i * 50)
-        })
+          const dbRow = await dbA.table(`test`).get(`delete-me`)
+          expect(dbRow).toBeUndefined()
+        } finally {
+          await teardownMultiTab(colA, colB, dbA, dbB)
+        }
+      }),
+      { numRuns: 8 }
     )
+  }, 30000)
 
-    await Promise.all(promises)
+  // PORTED to fast-check `fc.scheduler()`. The old version sprayed ops with
+  // `setTimeout(i*50)` — one nondeterministic, flaky ordering per run. Here
+  // each tab is an ordered sequence and the scheduler interleaves them, so the
+  // convergence invariant is checked against MANY interleavings deterministically
+  // (and shrinks on failure). Each sequence ends with an `*-insert-2`, so the
+  // globally-last op is always one of those → key present and both tabs agree.
+  it(`rapid alternating inserts/deletes converge across interleavings`, async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.scheduler(), async (s) => {
+        const { colA, colB, dbA, dbB } = await createMultiTabState()
+        try {
+          // Tab A: insert → delete → insert. Tab B: insert → insert.
+          s.scheduleSequence([
+            () => upsert(colA, { id: `flip-flop`, name: `A-insert-1` }),
+            async () => {
+              colA.delete(`flip-flop`)
+              await colA.stateWhenReady()
+            },
+            () => upsert(colA, { id: `flip-flop`, name: `A-insert-2` }),
+          ])
+          s.scheduleSequence([
+            () => upsert(colB, { id: `flip-flop`, name: `B-insert-1` }),
+            () => upsert(colB, { id: `flip-flop`, name: `B-insert-2` }),
+          ])
+          await s.waitAll()
 
-    // Wait for both collections to converge on the same final state
-    // for the flip-flop key. Retry until either both see the key with
-    // same value or both don't have it.
-    const start = Date.now()
-    let finalA: any = null
-    let finalB: any = null
-    for (;;) {
-      finalA = colA.get(`flip-flop`)
-      finalB = colB.get(`flip-flop`)
-      const same =
-        (finalA === undefined && finalB === undefined) ||
-        (finalA && finalB && JSON.stringify(finalA) === JSON.stringify(finalB))
-      if (same) break
-      if (Date.now() - start > 2000) break
-      await new Promise((r) => setTimeout(r, 50))
-    }
+          const utilsA = colA.utils as unknown as {
+            refetch?: () => Promise<void>
+          }
+          const utilsB = colB.utils as unknown as {
+            refetch?: () => Promise<void>
+          }
+          if (utilsA.refetch) await utilsA.refetch()
+          if (utilsB.refetch) await utilsB.refetch()
 
-    expect(JSON.stringify(finalA)).toEqual(JSON.stringify(finalB))
+          const finalA = colA.get(`flip-flop`)
+          const finalB = colB.get(`flip-flop`)
+          const cleanFinalA = finalA
+            ? { id: finalA.id, name: finalA.name }
+            : null
+          const cleanFinalB = finalB
+            ? { id: finalB.id, name: finalB.name }
+            : null
+          expect(cleanFinalA).toEqual(cleanFinalB)
+          if (finalA) {
+            expect(finalA.name).toMatch(/[AB]-insert-2/)
+          }
+        } finally {
+          await teardownMultiTab(colA, colB, dbA, dbB)
+        }
+      }),
+      { numRuns: 15 }
+    )
+  }, 60000)
 
-    if (finalA) {
-      expect(finalA.name).toMatch(/[AB]-insert-2/)
-    }
+  // PORTED to fast-check `fc.scheduler()`: tab A bulk-inserts ids 1-10, tab B
+  // inserts 5-15 (overlap 5-10). Each tab's inserts are an ordered sequence;
+  // the scheduler interleaves the two, exercising many orderings of the
+  // overlapping writes. Invariants hold for every interleaving: all 15 keys
+  // present, overlapping keys converge (last writer wins), disjoint keys keep
+  // their sole writer's value.
+  it(`bulk inserts with overlapping keys converge across interleavings`, async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.scheduler(), async (s) => {
+        const { colA, colB, dbA, dbB } = await createMultiTabState()
+        try {
+          const itemsA = Array.from({ length: 10 }, (_, i) => ({
+            id: String(i + 1),
+            name: `Item ${i + 1} from A`,
+          }))
+          const itemsB = Array.from({ length: 11 }, (_, i) => ({
+            id: String(i + 5),
+            name: `Item ${i + 5} from B`,
+          }))
 
-    dbA.close()
-    dbB.close()
+          s.scheduleSequence(itemsA.map((item) => () => upsert(colA, item)))
+          s.scheduleSequence(itemsB.map((item) => () => upsert(colB, item)))
+          await s.waitAll()
 
-    await Dexie.delete(dbA.name)
-  })
+          const utilsA = colA.utils as unknown as {
+            refetch?: () => Promise<void>
+          }
+          const utilsB = colB.utils as unknown as {
+            refetch?: () => Promise<void>
+          }
+          if (utilsA.refetch) await utilsA.refetch()
+          if (utilsB.refetch) await utilsB.refetch()
 
-  it(`handles bulk insert race conditions with overlapping keys`, async () => {
-    const { colA, colB, dbA, dbB } = await createMultiTabState()
+          await waitForBothCollections(colA, colB, 15, 2000)
 
-    // Collection A inserts items 1-10
-    const itemsA = Array.from({ length: 10 }, (_, i) => ({
-      id: String(i + 1),
-      name: `Item ${i + 1} from A`,
-    }))
+          expect(colA.size).toBe(15)
+          expect(colB.size).toBe(15)
 
-    // Collection B inserts items 5-15 (overlapping 5-10)
-    const itemsB = Array.from({ length: 11 }, (_, i) => ({
-      id: String(i + 5),
-      name: `Item ${i + 5} from B`,
-    }))
+          // Overlapping keys (5-10): last writer wins, both tabs agree.
+          for (let i = 5; i <= 10; i++) {
+            const valueA = colA.get(String(i))
+            const valueB = colB.get(String(i))
+            const dataA = valueA ? { id: valueA.id, name: valueA.name } : null
+            const dataB = valueB ? { id: valueB.id, name: valueB.name } : null
+            expect(dataA).toEqual(dataB)
+            expect(dataA?.name).toMatch(/Item \d+ from [AB]/)
+          }
 
-    // Execute bulk inserts concurrently
-    const bulkPromises = [
-      Promise.all(
-        itemsA.map(async (item) => {
-          const tx = colA.insert(item)
-          await tx.isPersisted.promise
-        })
-      ),
-      Promise.all(
-        itemsB.map(async (item) => {
-          const tx = colB.insert(item)
-          await tx.isPersisted.promise
-        })
-      ),
-    ]
-
-    await Promise.all(bulkPromises)
-
-    // Force refetch to ensure both see final state
-    const utilsA = colA.utils as unknown as { refetch?: () => Promise<void> }
-    const utilsB = colB.utils as unknown as { refetch?: () => Promise<void> }
-    if (utilsA.refetch) await utilsA.refetch()
-    if (utilsB.refetch) await utilsB.refetch()
-
-    await waitForBothCollections(colA, colB, 15, 2000)
-
-    // Both collections should have all 15 items (1-15)
-    expect(colA.size).toBe(15)
-    expect(colB.size).toBe(15)
-
-    // For overlapping keys (5-10), last writer should win
-    for (let i = 5; i <= 10; i++) {
-      const valueA = colA.get(String(i))
-      const valueB = colB.get(String(i))
-      expect(valueA).toEqual(valueB)
-      expect(valueA?.name).toMatch(/Item \d+ from [AB]/)
-    }
-
-    // Non-overlapping keys should have expected values
-    expect(colA.get(`1`)?.name).toBe(`Item 1 from A`)
-    expect(colA.get(`15`)?.name).toBe(`Item 15 from B`)
-
-    dbA.close()
-    dbB.close()
-    try {
-      await Dexie.delete(dbA.name)
-    } catch {
-      // ignore
-    }
-  })
+          // Disjoint keys keep their sole writer's value regardless of ordering.
+          expect(colA.get(`1`)?.name).toBe(`Item 1 from A`)
+          expect(colA.get(`15`)?.name).toBe(`Item 15 from B`)
+        } finally {
+          await teardownMultiTab(colA, colB, dbA, dbB)
+        }
+      }),
+      { numRuns: 6 }
+    )
+  }, 60000)
 
   it(`handles concurrent updates with refetch coordination`, async () => {
     const initialData = [
@@ -259,10 +331,17 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
     // Both collections should see the same final value
     const finalValueA = colA.get(`update-me`)
     const finalValueB = colB.get(`update-me`)
-    expect(finalValueA).toEqual(finalValueB)
+    // Compare only data fields, ignoring internal metadata
+    const dataA = finalValueA
+      ? { id: finalValueA.id, name: finalValueA.name }
+      : null
+    const dataB = finalValueB
+      ? { id: finalValueB.id, name: finalValueB.name }
+      : null
+    expect(dataA).toEqual(dataB)
 
     // Should have one of the updates (last writer wins)
-    expect(finalValueA?.name).toMatch(/Updated by [AB]/)
+    expect(dataA?.name).toMatch(/Updated by [AB]/)
 
     dbA.close()
     dbB.close()
@@ -361,7 +440,12 @@ describe(`Dexie Multi-tab Race Conditions`, () => {
       const itemId = String(i)
       expect(colA.has(itemId)).toBe(true)
       expect(colB.has(itemId)).toBe(true)
-      expect(colA.get(itemId)).toEqual(colB.get(itemId))
+      // Compare only data fields, ignoring internal metadata
+      const dataA = colA.get(itemId)
+      const dataB = colB.get(itemId)
+      const cleanDataA = dataA ? { id: dataA.id, name: dataA.name } : null
+      const cleanDataB = dataB ? { id: dataB.id, name: dataB.name } : null
+      expect(cleanDataA).toEqual(cleanDataB)
     }
 
     dbA.close()
