@@ -9,7 +9,7 @@ export default defineConfig({
     externalizeDeps(),
     preserveDirectives(),
     dts({
-      outDir: "dist/esm",
+      outDirs: "dist/esm",
       entryRoot: "src",
       include: "src",
       tsconfigPath: "./tsconfig.json",
